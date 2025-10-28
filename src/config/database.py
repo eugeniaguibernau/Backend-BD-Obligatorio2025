@@ -5,14 +5,19 @@ from typing import Any, Dict, List, Tuple, Optional
 
 load_dotenv()
 
+def _env_or_raise(key: str) -> str:
+    val = os.getenv(key)
+    if val is None or val == "":
+        raise RuntimeError(f"Falta la variable de entorno {key} en .env")
+    return val
 
 def get_db_config() -> Dict[str, Any]:
     return {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'port': int(os.getenv('DB_PORT', 3306)),
-        'user': os.getenv('DB_USER', 'root'),
-        'password': os.getenv('DB_PASSWORD', ''),
-        'database': os.getenv('DB_NAME', 'obligatorio'),
+        'host': _env_or_raise('DB_HOST'),
+        'port': int(os.getenv('DB_PORT', '3306')), 
+        'user': _env_or_raise('DB_USER'),
+        'password': os.getenv('DB_PASSWORD', ''),    
+        'database': _env_or_raise('DB_NAME'),
         'charset': 'utf8mb4',
         'cursorclass': pymysql.cursors.DictCursor,
     }

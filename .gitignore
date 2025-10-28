@@ -1,0 +1,11 @@
+# Entorno y dependencias locales
+.env
+.venv/
+__pycache__/
+
+# Archivos temporales de VS Code / PyCharm
+.idea/
+.vscode/
+
+# Archivos del sistema
+*.pyc
