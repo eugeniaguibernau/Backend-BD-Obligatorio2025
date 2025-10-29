@@ -85,8 +85,16 @@ def update_sala_route(edificio: str, nombre_sala: str):
 
 @sala_bp.route('/<edificio>/<nombre_sala>', methods=['DELETE'])
 def delete_sala_route(edificio: str, nombre_sala: str):
+    """
+    Elimina una sala.
+    
+    Validaciones:
+    - No se puede eliminar si tiene reservas activas o futuras
+    """
     try:
         affected = delete_sala(nombre_sala, edificio)
         return jsonify({'deleted': affected}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': 'internal error', 'detail': str(e)}), 500
