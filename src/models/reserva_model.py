@@ -25,6 +25,27 @@ def validar_reglas_negocio(datos):
 
     tipo_sala = sala['tipo_sala']
 
+    # Verificar disponibilidad de sala/turno (no debe haber otra reserva activa)
+    cursor.execute("""
+        SELECT COUNT(*) AS cantidad
+        FROM reserva
+        WHERE nombre_sala=%s AND edificio=%s AND fecha=%s AND id_turno=%s AND estado = 'activa'
+    """, (nombre_sala, edificio, fecha, id_turno))
+    conflicto = cursor.fetchone()['cantidad']
+    if conflicto and conflicto > 0:
+        return False, "La sala/turno ya está reservada en ese horario."
+
+    # Verificar sanciones vigentes por participante
+    for ci in participantes:
+        cursor.execute("""
+            SELECT COUNT(*) AS cantidad
+            FROM sancion_participante
+            WHERE ci_participante = %s AND fecha_fin >= CURDATE()
+        """, (ci,))
+        sanciones = cursor.fetchone()['cantidad']
+        if sanciones and sanciones > 0:
+            return False, f"El participante {ci} tiene sanciones vigentes y no puede reservar."
+
     for ci in participantes:
         cursor.execute("""
             SELECT pa.tipo, ppa.rol
@@ -71,11 +92,6 @@ def validar_reglas_negocio(datos):
     cursor.close()
     conexion.close()
     return True, "OK"
-
-
-# ---------------------------------------
-# FUNCIONES CRUD
-# ---------------------------------------
 
 def crear_reserva(nombre_sala, edificio, fecha, id_turno, participantes):
     conexion = get_connection()
@@ -132,8 +148,32 @@ def obtener_reserva(id_reserva):
 
 
 def actualizar_reserva(id_reserva, datos):
+    CANCEL_DIAS = 2
+    SANCION_DIAS = 7
+
     conexion = get_connection()
     cursor = conexion.cursor()
+
+    # Obtener reserva actual
+    cursor.execute("SELECT * FROM reserva WHERE id_reserva = %s", (id_reserva,))
+    reserva_actual = cursor.fetchone()
+    if not reserva_actual:
+        cursor.close()
+        conexion.close()
+        raise ValueError("Reserva no encontrada")
+
+    # Si se solicita cancelar, verificar ventana mínima
+    if 'estado' in datos and datos.get('estado') == 'cancelada':
+        fecha_reserva = reserva_actual['fecha']
+        if isinstance(fecha_reserva, str):
+            fecha_reserva = datetime.strptime(fecha_reserva, '%Y-%m-%d').date()
+        dias_anticipacion = (fecha_reserva - datetime.now().date()).days
+        if dias_anticipacion < CANCEL_DIAS:
+            cursor.close()
+            conexion.close()
+            raise ValueError(f"No se puede cancelar con menos de {CANCEL_DIAS} días de anticipación")
+
+    # Construir y ejecutar UPDATE
     campos = []
     valores = []
     for clave, valor in datos.items():
@@ -144,6 +184,31 @@ def actualizar_reserva(id_reserva, datos):
     cursor.execute(sql, valores)
     conexion.commit()
     filas_afectadas = cursor.rowcount
+
+    # Si se marcó como 'sin asistencia', crear sanciones automáticas para participantes sin asistencia
+    if 'estado' in datos and datos.get('estado') == 'sin asistencia':
+        # obtener participantes de la reserva con asistencia = FALSE or NULL
+        cursor.execute("""
+            SELECT rp.ci_participante, rp.asistencia
+            FROM reserva_participante rp
+            WHERE rp.id_reserva = %s
+        """, (id_reserva,))
+        rows = cursor.fetchall()
+        fecha_reserva = reserva_actual['fecha']
+        if isinstance(fecha_reserva, str):
+            fecha_reserva = datetime.strptime(fecha_reserva, '%Y-%m-%d').date()
+        fecha_fin = fecha_reserva + timedelta(days=SANCION_DIAS)
+        for row in rows:
+            asistencia = row.get('asistencia')
+            ci = row.get('ci_participante')
+            if asistencia is None or asistencia is False:
+                # insertar sancion si no existe
+                cursor.execute("""
+                    INSERT IGNORE INTO sancion_participante (ci_participante, fecha_inicio, fecha_fin)
+                    VALUES (%s, %s, %s)
+                """, (ci, fecha_reserva, fecha_fin))
+        conexion.commit()
+
     cursor.close()
     conexion.close()
     return filas_afectadas
@@ -154,6 +219,21 @@ def eliminar_reserva(id_reserva):
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM reserva_participante WHERE id_reserva=%s", (id_reserva,))
     cursor.execute("DELETE FROM reserva WHERE id_reserva=%s", (id_reserva,))
+    conexion.commit()
+    filas_afectadas = cursor.rowcount
+    cursor.close()
+    conexion.close()
+    return filas_afectadas
+
+
+def marcar_asistencia(id_reserva, ci_participante, asistencia: bool):
+    """Marcar asistencia (True/False) para un participante en una reserva."""
+    conexion = get_connection()
+    cursor = conexion.cursor()
+    cursor.execute(
+        "UPDATE reserva_participante SET asistencia=%s WHERE id_reserva=%s AND ci_participante=%s",
+        (1 if asistencia else 0, id_reserva, ci_participante)
+    )
     conexion.commit()
     filas_afectadas = cursor.rowcount
     cursor.close()

@@ -6,7 +6,8 @@ from src.models.reserva_model import (
     obtener_reserva,
     actualizar_reserva,
     eliminar_reserva,
-    validar_reglas_negocio
+    validar_reglas_negocio,
+    marcar_asistencia
 )
 
 reserva_bp = Blueprint('reserva_bp', __name__)
@@ -83,5 +84,20 @@ def eliminar_reserva_ruta(id_reserva: int):
     try:
         filas_afectadas = eliminar_reserva(id_reserva)
         return jsonify({'reservas_eliminadas': filas_afectadas}), 200
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+@reserva_bp.route('/<int:id_reserva>/participantes/<int:ci>/asistencia', methods=['POST'])
+def marcar_asistencia_ruta(id_reserva: int, ci: int):
+    datos = request.get_json() or {}
+    if 'asistencia' not in datos:
+        return jsonify({'error': 'Falta campo asistencia (true/false)'}), 400
+    try:
+        asistencia = bool(datos.get('asistencia'))
+        filas = marcar_asistencia(id_reserva, ci, asistencia)
+        if filas == 0:
+            return jsonify({'error': 'Participante o reserva no encontrada'}), 404
+        return jsonify({'asistencia_actualizada': filas}), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
