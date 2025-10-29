@@ -9,7 +9,9 @@ def create_app(config_object=None):
 
 	# Blueprints: registrar rutas de los módulos (esto es a lo que después llamamos como endpoints del front)
 	from src.routes.sala_routes import sala_bp
+	from src.routes.participante_routes import participante_bp
 	app.register_blueprint(sala_bp, url_prefix='/salas')
+	app.register_blueprint(participante_bp, url_prefix='/participantes')
 
 	@app.route('/health')
 	def health():

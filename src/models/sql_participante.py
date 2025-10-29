@@ -1,51 +1,10 @@
 from typing import Any, Dict, List, Optional
 from src.config.database import execute_query, execute_non_query, get_connection
 import pymysql
-import re
-
-
-# Regex para validar formato de email
-EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-# Límites de longitud según esquema SQL
-MAX_NOMBRE_LENGTH = 20
-MAX_APELLIDO_LENGTH = 20
-MAX_EMAIL_LENGTH = 30
-
-
-def _validate_email(email: str) -> bool:
-    """Valida el formato del email usando regex."""
-    return re.match(EMAIL_REGEX, email) is not None
-
-
-def _validate_field_length(field_name: str, value: str, max_length: int) -> None:
-    """Valida que un campo no exceda la longitud máxima."""
-    if len(value) > max_length:
-        raise ValueError(f"El {field_name} no puede exceder {max_length} caracteres")
-
-
-def _validate_not_empty(field_name: str, value: str) -> None:
-    """Valida que un campo no esté vacío."""
-    if not value or not value.strip():
-        raise ValueError(f"El {field_name} es obligatorio y no puede estar vacío")
 
 
 def create_participante(ci: int, nombre: str, apellido: str, email: str) -> int:
     """Crea un participante. Valida que CI y email sean únicos."""
-    # Validar campos no vacíos
-    _validate_not_empty("nombre", nombre)
-    _validate_not_empty("apellido", apellido)
-    _validate_not_empty("email", email)
-    
-    # Validar longitud de campos
-    _validate_field_length("nombre", nombre, MAX_NOMBRE_LENGTH)
-    _validate_field_length("apellido", apellido, MAX_APELLIDO_LENGTH)
-    _validate_field_length("email", email, MAX_EMAIL_LENGTH)
-    
-    # Validar formato de email
-    if not _validate_email(email):
-        raise ValueError(f"El email '{email}' no tiene un formato válido")
-    
     query = """
     INSERT INTO participante (ci, nombre, apellido, email)
     VALUES (%s, %s, %s, %s)
@@ -102,29 +61,12 @@ def update_participante(ci: int, nombre: Optional[str] = None,
     params: List[Any] = []
     
     if nombre is not None:
-        # Validar campo no vacío
-        _validate_not_empty("nombre", nombre)
-        # Validar longitud
-        _validate_field_length("nombre", nombre, MAX_NOMBRE_LENGTH)
         sets.append("nombre=%s")
         params.append(nombre)
-    
     if apellido is not None:
-        # Validar campo no vacío
-        _validate_not_empty("apellido", apellido)
-        # Validar longitud
-        _validate_field_length("apellido", apellido, MAX_APELLIDO_LENGTH)
         sets.append("apellido=%s")
         params.append(apellido)
-    
     if email is not None:
-        # Validar campo no vacío
-        _validate_not_empty("email", email)
-        # Validar longitud
-        _validate_field_length("email", email, MAX_EMAIL_LENGTH)
-        # Validar formato de email
-        if not _validate_email(email):
-            raise ValueError(f"El email '{email}' no tiene un formato válido")
         sets.append("email=%s")
         params.append(email)
     
