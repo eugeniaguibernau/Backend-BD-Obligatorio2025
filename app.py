@@ -13,6 +13,10 @@ def create_app(config_object=None):
 	app.register_blueprint(sala_bp, url_prefix='/salas')
 	app.register_blueprint(participante_bp, url_prefix='/participantes')
 
+	# Registrar rutas de reserva
+	from src.routes.reserva_routes import reserva_bp
+	app.register_blueprint(reserva_bp, url_prefix='/reservas')
+
 	@app.route('/health')
 	def health():
 		return jsonify({'status': 'ok'}), 200
