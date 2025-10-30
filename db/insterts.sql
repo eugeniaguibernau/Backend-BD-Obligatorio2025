@@ -7,9 +7,9 @@ INSERT INTO admin (ci, nombre, apellido, email) VALUES
 (99999999, 'Ana', 'Silva', 'ana.silva@ucu.edu.uy');
 
 INSERT INTO login (correo, contraseña) VALUES
-('fabrizio@ucu.edu.uy', 'fabrizio123'),
-('lucia@ucu.edu.uy', 'lucia123'),
-('mateo@ucu.edu.uy', 'mateo123');
+('fabrizio@ucu.edu.uy', '$2b$12$FejbkwVJRhvTEow4V05GIuKamP.zcKQAMwLSv3urDzMGIpKw.Im6y'),
+('lucia@ucu.edu.uy',    '$2b$12$lG.XpyXJRd4GnhEAlzfSeusjoNG.V5vKseTYPghO.G3JlJsNonC0S'),
+('mateo@ucu.edu.uy',    '$2b$12$VChKZrpWtwo/Q04EQE1WqeRcdM85.mxDIaDGnk11PxgtUOkOUb1Bi');
 
 INSERT INTO facultad (nombre) VALUES
 ('Ingeniería'),
