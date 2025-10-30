@@ -17,10 +17,6 @@ def create_app(config_object=None):
 	from src.routes.reserva_routes import reserva_bp
 	app.register_blueprint(reserva_bp, url_prefix='/reservas')
 
-	# Registrar rutas de auth (register/login)
-	from src.routes.auth_routes import auth_bp
-	app.register_blueprint(auth_bp, url_prefix='/api/auth')
-
 	@app.route('/health')
 	def health():
 		return jsonify({'status': 'ok'}), 200
