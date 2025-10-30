@@ -1,6 +1,7 @@
 # Entorno y dependencias locales
 .env
 .venv/
+venv/
 __pycache__/
 
 # Archivos temporales de VS Code / PyCharm

@@ -21,6 +21,10 @@ def create_app(config_object=None):
 	from src.routes.auth_routes import auth_bp
 	app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
+	# Registrar rutas de reportes (métricas BI)
+	from src.routes.reports_routes import reports_bp
+	app.register_blueprint(reports_bp, url_prefix='/api/reports')
+
 	@app.route('/health')
 	def health():
 		return jsonify({'status': 'ok'}), 200
