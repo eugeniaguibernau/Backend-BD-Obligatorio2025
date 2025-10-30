@@ -1,3 +1,5 @@
+USE proyecto;
+
 INSERT INTO participante (ci, nombre, apellido, email) VALUES
 (11111111, 'Fabrizio', 'Rodríguez', 'fabrizio@ucu.edu.uy'),
 (22222222, 'Lucía', 'Fernández', 'lucia@ucu.edu.uy'),
