@@ -1,7 +1,8 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 import re
 from src.auth.login import hash_password, authenticate_user
 from src.config.database import get_connection
+from src.auth.jwt_utils import create_token
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -68,4 +69,6 @@ def login():
         # payload is an error message
         return jsonify({"ok": False, "mensaje": payload}), 401
 
-    return jsonify({"ok": True, "data": payload}), 200
+    # Create JWT token and return it with the response
+    token = create_token(correo)
+    return jsonify({"ok": True, "data": payload, "token": token}), 200
