@@ -366,3 +366,112 @@ def reservations_and_attendance_by_role():
         }), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+@reports_bp.route('/sanctions-by-role', methods=['GET'])
+def sanctions_by_role():
+    """
+    Consulta: Cantidad de sanciones por rol y tipo de programa (alumno/docente x grado/posgrado)
+
+    Query params opcionales:
+    - start_date: fecha inicio (YYYY-MM-DD) (filtra por fecha_inicio de la sanción)
+    - end_date: fecha fin (YYYY-MM-DD) (filtra por fecha_fin de la sanción)
+    """
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    query = """
+        SELECT
+            ppa.rol, pa.tipo as tipo_programa, COUNT(sp.ci_participante) as total_sanciones
+        FROM sancion_participante sp
+        JOIN participante_programa_academico ppa ON sp.ci_participante = ppa.ci_participante
+        JOIN programa_academico pa ON ppa.nombre_programa = pa.nombre_programa
+    """
+
+    filters = []
+    params = []
+
+    if start_date:
+        filters.append("sp.fecha_inicio >= %s")
+        params.append(start_date)
+
+    if end_date:
+        filters.append("sp.fecha_fin <= %s")
+        params.append(end_date)
+
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+
+    query += """
+        GROUP BY ppa.rol, pa.tipo
+        ORDER BY total_sanciones DESC
+    """
+
+    try:
+        results = execute_query(query, tuple(params) if params else None)
+        return jsonify({
+            'sanciones_por_rol': results,
+            'total': len(results)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+@reports_bp.route('/used-vs-cancelled', methods=['GET'])
+def used_vs_cancelled():
+    """
+    Consulta: Porcentaje de reservas efectivamente utilizadas vs canceladas/no asistidas
+
+    Query params opcionales:
+    - start_date: fecha inicio (YYYY-MM-DD)
+    - end_date: fecha fin (YYYY-MM-DD)
+    """
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    query = """
+        SELECT
+            SUM(CASE WHEN r.estado = 'finalizada' THEN 1 ELSE 0 END) as used,
+            SUM(CASE WHEN r.estado IN ('cancelada','sin asistencia') THEN 1 ELSE 0 END) as cancelled_or_no_show,
+            COUNT(*) as total_reservas
+        FROM reserva r
+    """
+
+    filters = []
+    params = []
+
+    if start_date:
+        filters.append("r.fecha >= %s")
+        params.append(start_date)
+
+    if end_date:
+        filters.append("r.fecha <= %s")
+        params.append(end_date)
+
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+
+    try:
+        rows = execute_query(query, tuple(params) if params else None)
+        # execute_query returns a list of rows; for an aggregate query we expect one row
+        row = rows[0] if rows else {'used': 0, 'cancelled_or_no_show': 0, 'total_reservas': 0}
+
+        used = int(row.get('used', 0) or 0)
+        cancelled = int(row.get('cancelled_or_no_show', 0) or 0)
+        total = int(row.get('total_reservas', 0) or 0)
+
+        if total > 0:
+            pct_used = round((used / total) * 100, 2)
+            pct_cancelled = round((cancelled / total) * 100, 2)
+        else:
+            pct_used = pct_cancelled = 0.0
+
+        return jsonify({
+            'used': used,
+            'cancelled_or_no_show': cancelled,
+            'total_reservas': total,
+            'porcentaje_usadas': pct_used,
+            'porcentaje_canceladas_o_no_asistidas': pct_cancelled
+        }), 200
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
