@@ -52,7 +52,8 @@ def listar_reservas_ruta():
 
     try:
         reservas = listar_reservas(ci_participante=ci_participante, nombre_sala=nombre_sala)
-        return jsonify({'reservas': reservas}), 200
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({'reservas': reservas})), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
@@ -63,7 +64,8 @@ def obtener_reserva_ruta(id_reserva: int):
         reserva = obtener_reserva(id_reserva)
         if not reserva:
             return jsonify({'error': 'Reserva no encontrada'}), 404
-        return jsonify({'reserva': reserva}), 200
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({'reserva': reserva})), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 

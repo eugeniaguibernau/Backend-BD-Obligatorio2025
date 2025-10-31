@@ -7,6 +7,14 @@ WORKDIR /app
 # Copiamos dependencias
 COPY requirements.txt .
 
+# Instalar herramientas necesarias para compilar extensiones nativas (bcrypt y similares)
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+	   build-essential \
+	   libssl-dev \
+	   libffi-dev \
+	&& rm -rf /var/lib/apt/lists/*
+
 # Instalamos dependencias del proyecto
 RUN pip install --no-cache-dir -r requirements.txt
 

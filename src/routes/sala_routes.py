@@ -46,7 +46,8 @@ def list_salas_route():
 
     try:
         rows = list_salas(edificio=edificio, tipo_sala=tipo, min_capacidad=min_cap_int)
-        return jsonify({'salas': rows}), 200
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({'salas': rows})), 200
     except Exception as e:
         return jsonify({'error': 'internal error', 'detail': str(e)}), 500
 
@@ -57,7 +58,8 @@ def get_sala_route(edificio: str, nombre_sala: str):
         row = get_sala(nombre_sala, edificio)
         if not row:
             return jsonify({'error': 'not found'}), 404
-        return jsonify({'sala': row}), 200
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({'sala': row})), 200
     except Exception as e:
         return jsonify({'error': 'internal error', 'detail': str(e)}), 500
 

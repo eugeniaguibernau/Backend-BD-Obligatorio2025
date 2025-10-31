@@ -55,10 +55,11 @@ def most_reserved_rooms():
     
     try:
         results = execute_query(query, tuple(params))
-        return jsonify({
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({
             'salas_mas_reservadas': results,
             'total': len(results)
-        }), 200
+        })), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
@@ -103,10 +104,11 @@ def most_demanded_turns():
     
     try:
         results = execute_query(query, tuple(params) if params else None)
-        return jsonify({
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({
             'turnos_mas_demandados': results,
             'total': len(results)
-        }), 200
+        })), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
@@ -176,10 +178,11 @@ def avg_participants_by_room():
                 row['promedio_participantes'] = 0
                 row['porcentaje_ocupacion'] = 0
         
-        return jsonify({
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({
             'promedio_participantes_por_sala': results,
             'total': len(results)
-        }), 200
+        })), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
@@ -234,10 +237,11 @@ def reservations_by_program():
     
     try:
         results = execute_query(query, tuple(params) if params else None)
-        return jsonify({
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({
             'reservas_por_programa': results,
             'total': len(results)
-        }), 200
+        })), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
@@ -296,10 +300,11 @@ def occupancy_by_building():
                 row['ratio_ocupacion'] = 0
                 row['porcentaje_ocupacion'] = 0
         
-        return jsonify({
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({
             'ocupacion_por_edificio': results,
             'total': len(results)
-        }), 200
+        })), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
@@ -360,10 +365,11 @@ def reservations_and_attendance_by_role():
     
     try:
         results = execute_query(query, tuple(params) if params else None)
-        return jsonify({
+        from src.utils.response import with_auth_link
+        return jsonify(with_auth_link({
             'reservas_y_asistencias_por_rol': results,
             'total': len(results)
-        }), 200
+        })), 200
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
