@@ -33,24 +33,48 @@ def authenticate_user(correo: str, plain_password: str):
 	"""Comprueba credenciales contra la tabla `login`.
 
 	Retorna una tupla (ok: bool, data_or_message).
-	- Si ok=True -> data_or_message es el diccionario del usuario (correo)
+	- Si ok=True -> data_or_message es el diccionario del usuario con tipo y ID
 	- Si ok=False -> data_or_message es un mensaje de error
 	"""
 	if not correo or not plain_password:
 		return False, "correo y contraseña requeridos"
 
-	conn = get_connection()
+	conn = get_connection('readonly')
 	cur = conn.cursor()
 	cur.execute("SELECT correo, contraseña FROM login WHERE correo = %s", (correo,))
 	row = cur.fetchone()
-	cur.close()
-	conn.close()
 
 	if not row:
+		cur.close()
+		conn.close()
 		return False, "Usuario no encontrado"
 
 	hashed = row.get('contraseña') if isinstance(row, dict) else row[1]
 	if not verify_password(plain_password, hashed):
+		cur.close()
+		conn.close()
 		return False, "Credenciales incorrectas"
+	
+	# Determinar si es admin o participante
+	cur.execute("SELECT id_admin FROM admin WHERE correo = %s", (correo,))
+	admin_row = cur.fetchone()
+	
+	if admin_row:
+		# Es admin
+		user_type = 'admin'
+		user_id = admin_row.get('id_admin') if isinstance(admin_row, dict) else admin_row[0]
+	else:
+		# Es participante
+		cur.execute("SELECT ci FROM participante WHERE email = %s", (correo,))
+		part_row = cur.fetchone()
+		user_type = 'participante'
+		user_id = part_row.get('ci') if part_row and isinstance(part_row, dict) else (part_row[0] if part_row else None)
+	
+	cur.close()
+	conn.close()
 
-	return True, {"correo": correo}
+	return True, {
+		"correo": correo,
+		"user_type": user_type,
+		"user_id": user_id
+	}

@@ -15,7 +15,7 @@ def crear_sancion(ci_participante: int, fecha_inicio, fecha_fin):
     fecha_inicio = _to_date(fecha_inicio)
     fecha_fin = _to_date(fecha_fin)
 
-    conexion = get_connection()
+    conexion = get_connection(role='user')
     cursor = conexion.cursor()
     cursor.execute("""
         INSERT IGNORE INTO sancion_participante (ci_participante, fecha_inicio, fecha_fin)
@@ -31,7 +31,7 @@ def listar_sanciones(ci_participante: int | None = None, solo_activas: bool = Fa
     """
     Lista sanciones. Si solo_activas=True filtra por fecha_fin >= CURDATE().
     """
-    conexion = get_connection()
+    conexion = get_connection(role='readonly')
     cursor = conexion.cursor()
     where = []
     params = []
@@ -60,7 +60,7 @@ def eliminar_sancion(ci_participante: int, fecha_inicio, fecha_fin):
     fecha_inicio = _to_date(fecha_inicio)
     fecha_fin = _to_date(fecha_fin)
 
-    conexion = get_connection()
+    conexion = get_connection(role='admin')
     cursor = conexion.cursor()
     cursor.execute("""
         DELETE FROM sancion_participante
@@ -80,7 +80,7 @@ def aplicar_sanciones_por_reserva(id_reserva: int, sancion_dias: int = 7):
 
     Retorna: dict con {'sancionados': [...], 'insertadas': N, 'fecha_inicio': date, 'fecha_fin': date}
     """
-    conexion = get_connection()
+    conexion = get_connection(role='user')
     cursor = conexion.cursor()
 
     # 1) Obtener fecha de la reserva (para usar como inicio de sanción)

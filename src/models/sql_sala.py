@@ -14,7 +14,7 @@ def create_sala(nombre_sala: str, edificio: str, capacidad: int, tipo_sala: str)
         raise ValueError(f"tipo_sala debe ser uno de {VALID_TIPOS}")
     
     # Validar que el edificio existe
-    edificio_exists = execute_query("SELECT nombre_edificio FROM edificio WHERE nombre_edificio=%s", (edificio,))
+    edificio_exists = execute_query("SELECT nombre_edificio FROM edificio WHERE nombre_edificio=%s", (edificio,), role='readonly')
     if not edificio_exists:
         raise ValueError(f"El edificio '{edificio}' no existe")
 
@@ -22,13 +22,13 @@ def create_sala(nombre_sala: str, edificio: str, capacidad: int, tipo_sala: str)
     INSERT INTO sala (nombre_sala, edificio, capacidad, tipo_sala)
     VALUES (%s, %s, %s, %s)
     """
-    affected = execute_non_query(query, (nombre_sala, edificio, capacidad, tipo_sala))
+    affected = execute_non_query(query, (nombre_sala, edificio, capacidad, tipo_sala), role='user')
     return affected
 
 
 def get_sala(nombre_sala: str, edificio: str) -> Optional[Dict[str, Any]]:
     query = "SELECT nombre_sala, edificio, capacidad, tipo_sala FROM sala WHERE nombre_sala=%s AND edificio=%s"
-    rows = execute_query(query, (nombre_sala, edificio))
+    rows = execute_query(query, (nombre_sala, edificio), role='readonly')
     return rows[0] if rows else None
 
 
@@ -48,8 +48,7 @@ def list_salas(edificio: Optional[str] = None, tipo_sala: Optional[str] = None, 
 
     if filters:
         base = f"{base} WHERE {' AND '.join(filters)}"
-
-    return execute_query(base, tuple(params))
+    return execute_query(base, tuple(params), role='readonly')
 
 
 def update_sala(nombre_sala: str, edificio: str, capacidad: Optional[int] = None, tipo_sala: Optional[str] = None) -> int:
@@ -74,7 +73,7 @@ def update_sala(nombre_sala: str, edificio: str, capacidad: Optional[int] = None
                 GROUP BY r.id_reserva
             ) AS subquery
         """
-        max_participantes_result = execute_query(max_participantes_query, (nombre_sala, edificio))
+        max_participantes_result = execute_query(max_participantes_query, (nombre_sala, edificio), role='readonly')
         
         if max_participantes_result and max_participantes_result[0]['max_count'] is not None:
             max_participantes = max_participantes_result[0]['max_count']
@@ -97,13 +96,13 @@ def update_sala(nombre_sala: str, edificio: str, capacidad: Optional[int] = None
         return 0
     
     # Validar que el edificio existe si se está cambiando
-    edificio_exists = execute_query("SELECT nombre_edificio FROM edificio WHERE nombre_edificio=%s", (edificio,))
+    edificio_exists = execute_query("SELECT nombre_edificio FROM edificio WHERE nombre_edificio=%s", (edificio,), role='readonly')
     if not edificio_exists:
         raise ValueError(f"El edificio '{edificio}' no existe")
 
     params.extend([nombre_sala, edificio])
     query = f"UPDATE sala SET {', '.join(sets)} WHERE nombre_sala=%s AND edificio=%s"
-    return execute_non_query(query, tuple(params))
+    return execute_non_query(query, tuple(params), role='user')
 
 
 def delete_sala(nombre_sala: str, edificio: str) -> int:
@@ -115,7 +114,7 @@ def delete_sala(nombre_sala: str, edificio: str) -> int:
     - No se puede eliminar si tiene reservas futuras
     """
     from src.config.database import get_connection
-    conn = get_connection()
+    conn = get_connection('admin')  # DELETE requiere rol admin
     try:
         with conn.cursor() as cur:
             # Verificar si tiene reservas activas o futuras

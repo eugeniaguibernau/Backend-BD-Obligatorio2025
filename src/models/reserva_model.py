@@ -12,7 +12,7 @@ def validar_reglas_negocio(datos):
     fecha = datos['fecha']
     id_turno = datos['id_turno']
 
-    conexion = get_connection()
+    conexion = get_connection(role='readonly')
     cursor = conexion.cursor()
 
     cursor.execute("SELECT capacidad, tipo_sala FROM sala WHERE nombre_sala=%s AND edificio=%s", (nombre_sala, edificio))
@@ -94,7 +94,7 @@ def validar_reglas_negocio(datos):
     return True, "OK"
 
 def crear_reserva(nombre_sala, edificio, fecha, id_turno, participantes):
-    conexion = get_connection()
+    conexion = get_connection(role='user')
     cursor = conexion.cursor()
     cursor.execute("""
         INSERT INTO reserva (nombre_sala, edificio, fecha, id_turno, estado)
@@ -115,7 +115,7 @@ def crear_reserva(nombre_sala, edificio, fecha, id_turno, participantes):
 
 
 def listar_reservas(ci_participante=None, nombre_sala=None):
-    conexion = get_connection()
+    conexion = get_connection(role='readonly')
     cursor = conexion.cursor()
     consulta = "SELECT * FROM reserva"
     parametros = []
@@ -138,7 +138,7 @@ def listar_reservas(ci_participante=None, nombre_sala=None):
 
 
 def obtener_reserva(id_reserva):
-    conexion = get_connection()
+    conexion = get_connection(role='readonly')
     cursor = conexion.cursor()
     cursor.execute("SELECT * FROM reserva WHERE id_reserva = %s", (id_reserva,))
     fila = cursor.fetchone()
@@ -151,7 +151,7 @@ def actualizar_reserva(id_reserva, datos):
     CANCEL_DIAS = 2
     SANCION_DIAS = 7
 
-    conexion = get_connection()
+    conexion = get_connection(role='user')
     cursor = conexion.cursor()
 
     # Obtener reserva actual
@@ -215,7 +215,7 @@ def actualizar_reserva(id_reserva, datos):
 
 
 def eliminar_reserva(id_reserva):
-    conexion = get_connection()
+    conexion = get_connection(role='admin')
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM reserva_participante WHERE id_reserva=%s", (id_reserva,))
     cursor.execute("DELETE FROM reserva WHERE id_reserva=%s", (id_reserva,))
@@ -228,7 +228,7 @@ def eliminar_reserva(id_reserva):
 
 def marcar_asistencia(id_reserva, ci_participante, asistencia: bool):
     """Marcar asistencia (True/False) para un participante en una reserva."""
-    conexion = get_connection()
+    conexion = get_connection(role='user')
     cursor = conexion.cursor()
     cursor.execute(
         "UPDATE reserva_participante SET asistencia=%s WHERE id_reserva=%s AND ci_participante=%s",

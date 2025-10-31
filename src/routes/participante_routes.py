@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 import re
 from src.models.participante_model import (
     create_participante,
@@ -12,6 +12,7 @@ from src.models.participante_model import (
 )
 from src.utils.response import with_auth_link
 from src.auth.jwt_utils import jwt_required
+from src.middleware.permissions import require_admin, can_modify_resource
 
 participante_bp = Blueprint('participante_bp', __name__)
 
@@ -116,10 +117,22 @@ def list_participantes_route():
 def get_participante_route(ci: int):
     """
     Obtiene un participante por CI.
+    - Admin: puede ver cualquier participante
+    - Participante: solo puede ver su propia información
 
     Query params opcionales:
     - detailed: si es "true", incluye programas académicos
     """
+    # Verificar permisos
+    user_type = getattr(g, 'user_type', 'participante')
+    user_id = getattr(g, 'user_id', None)
+    
+    if user_type != 'admin' and str(user_id) != str(ci):
+        return jsonify({
+            'ok': False,
+            'mensaje': 'No tiene permisos para ver este participante'
+        }), 403
+    
     detailed = request.args.get('detailed', '').lower() == 'true'
 
     try:
@@ -137,9 +150,12 @@ def get_participante_route(ci: int):
 
 
 @participante_bp.route('/<int:ci>', methods=['PUT'])
+@jwt_required
 def update_participante_route(ci: int):
     """
     Actualiza un participante.
+    - Admin: puede actualizar cualquier participante
+    - Participante: solo puede actualizar su propia información
 
     Body JSON (todos opcionales):
     {
@@ -148,6 +164,13 @@ def update_participante_route(ci: int):
         "email": "nuevo.email@example.com"
     }
     """
+    # Verificar permisos
+    if not can_modify_resource(ci):
+        return jsonify({
+            'ok': False,
+            'mensaje': 'No tiene permisos para modificar este participante'
+        }), 403
+        
     data = request.get_json() or {}
 
     if not data:
@@ -202,9 +225,12 @@ def update_participante_route(ci: int):
 
 
 @participante_bp.route('/<int:ci>', methods=['DELETE'])
+@jwt_required
+@require_admin  # Solo admins pueden eliminar participantes
 def delete_participante_route(ci: int):
     """
     Elimina un participante.
+    REQUIERE PERMISOS DE ADMINISTRADOR
 
     Validaciones:
     - No puede tener login asociado

@@ -9,11 +9,14 @@ from src.models.sql_sala import (
     VALID_TIPOS,
 )
 from src.auth.jwt_utils import jwt_required
+from src.middleware.permissions import require_admin
 
 sala_bp = Blueprint('sala_bp', __name__)
 
 
 @sala_bp.route('/', methods=['POST'])
+@jwt_required
+@require_admin  # Solo admins pueden crear salas
 def create_sala_route():
     data = request.get_json() or {}
     required = ['nombre_sala', 'edificio', 'capacidad', 'tipo_sala']
@@ -68,6 +71,8 @@ def get_sala_route(edificio: str, nombre_sala: str):
 
 
 @sala_bp.route('/<edificio>/<nombre_sala>', methods=['PUT'])
+@jwt_required
+@require_admin  # Solo admins pueden actualizar salas
 def update_sala_route(edificio: str, nombre_sala: str):
     data = request.get_json() or {}
     capacidad = data.get('capacidad')
@@ -89,9 +94,12 @@ def update_sala_route(edificio: str, nombre_sala: str):
 
 
 @sala_bp.route('/<edificio>/<nombre_sala>', methods=['DELETE'])
+@jwt_required
+@require_admin  # Solo admins pueden eliminar salas
 def delete_sala_route(edificio: str, nombre_sala: str):
     """
     Elimina una sala.
+    REQUIERE PERMISOS DE ADMINISTRADOR
     
     Validaciones:
     - No se puede eliminar si tiene reservas activas o futuras
