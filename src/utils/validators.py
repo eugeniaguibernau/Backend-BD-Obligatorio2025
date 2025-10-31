@@ -21,19 +21,26 @@ def is_strong_password(password: str) -> bool:
 
 def validate_participante(part: dict) -> (bool, str):
     """Validate optional participante payload. Returns (ok, message)."""
+    # Ahora requerimos que el objeto `participante` exista y contenga `ci` válido.
     if not part:
-        return True, ''
+        return False, 'participante requerido'
     if not isinstance(part, dict):
         return False, 'participante debe ser un objeto'
+
     nombre = part.get('nombre', '')
     apellido = part.get('apellido', '')
-    ci = part.get('ci', 0)
+    # `ci` es obligatorio y debe ser un entero positivo
+    if 'ci' not in part:
+        return False, 'ci requerido en participante'
+    ci = part.get('ci')
+
     if nombre and (not isinstance(nombre, str) or len(nombre) > 100):
         return False, 'nombre inválido'
     if apellido and (not isinstance(apellido, str) or len(apellido) > 100):
         return False, 'apellido inválido'
     try:
-        if ci and int(ci) < 0:
+        ci_int = int(ci)
+        if ci_int <= 0:
             return False, 'ci inválido'
     except Exception:
         return False, 'ci inválido'

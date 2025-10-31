@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
+import pymysql
 from src.auth.login import hash_password, authenticate_user
 from src.config.database import get_connection
 from src.auth.jwt_utils import create_token
@@ -33,27 +34,64 @@ def register():
     conn = get_connection()
     cur = conn.cursor()
 
-    # Crear participante si no existe
-    cur.execute("SELECT email FROM participante WHERE email = %s", (correo,))
-    if not cur.fetchone():
-        ci = participante.get('ci') or 0
-        nombre = participante.get('nombre') or ''
-        apellido = participante.get('apellido') or ''
-        cur.execute(
-            "INSERT INTO participante (ci, nombre, apellido, email) VALUES (%s,%s,%s,%s)",
-            (ci, nombre, apellido, correo)
-        )
+    # Preparar datos del participante
+    ci = participante.get('ci') if participante else None
+    nombre = participante.get('nombre') if participante else ''
+    apellido = participante.get('apellido') if participante else ''
 
-    hashed = hash_password(plain)
-    cur.execute("SELECT correo FROM login WHERE correo = %s", (correo,))
-    if cur.fetchone():
-        cur.execute("UPDATE login SET `contraseña` = %s WHERE correo = %s", (hashed, correo))
-    else:
-        cur.execute("INSERT INTO login (correo, `contraseña`) VALUES (%s, %s)", (correo, hashed))
+    try:
+        # Comprobar existencia preferentemente por CI (si se envía), sino por email
+        exists_by_ci = None
+        if ci:
+            cur.execute("SELECT ci FROM participante WHERE ci = %s", (ci,))
+            exists_by_ci = cur.fetchone()
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        cur.execute("SELECT email FROM participante WHERE email = %s", (correo,))
+        exists_by_email = cur.fetchone()
+
+        if not exists_by_ci and not exists_by_email:
+            # No existe: insertar nuevo participante
+            cur.execute(
+                "INSERT INTO participante (ci, nombre, apellido, email) VALUES (%s,%s,%s,%s)",
+                (ci or 0, nombre, apellido, correo)
+            )
+        elif exists_by_ci and not exists_by_email:
+            # El CI ya existe pero el email es nuevo: actualizar registro para mantener consistencia
+            cur.execute(
+                "UPDATE participante SET nombre=%s, apellido=%s, email=%s WHERE ci=%s",
+                (nombre, apellido, correo, ci)
+            )
+
+        # Ahora insertar/actualizar login
+        hashed = hash_password(plain)
+        cur.execute("SELECT correo FROM login WHERE correo = %s", (correo,))
+        if cur.fetchone():
+            cur.execute("UPDATE login SET `contraseña` = %s WHERE correo = %s", (hashed, correo))
+        else:
+            cur.execute("INSERT INTO login (correo, `contraseña`) VALUES (%s, %s)", (correo, hashed))
+
+        conn.commit()
+    except pymysql.err.IntegrityError as e:
+        # Manejar violaciones de constraints (por ejemplo duplicados de PK) de forma limpia
+        conn.rollback()
+        cur.close()
+        conn.close()
+        current_app.logger.warning(f"IntegrityError en register: {e}")
+        return jsonify({"ok": False, "mensaje": "Conflicto en la base de datos: dato duplicado"}), 409
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        current_app.logger.error(f"Error en register: {e}")
+        return jsonify({"ok": False, "mensaje": "Error interno al crear usuario"}), 500
+    finally:
+        # cerrar si no fue cerrado ya
+        try:
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
     return jsonify({"ok": True, "mensaje": "Usuario creado/actualizado"}), 201
 
 
