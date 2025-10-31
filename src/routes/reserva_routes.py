@@ -9,6 +9,7 @@ from src.models.reserva_model import (
     validar_reglas_negocio,
     marcar_asistencia
 )
+from src.models.sancion_model import aplicar_sanciones_por_reserva
 
 reserva_bp = Blueprint('reserva_bp', __name__)
 
@@ -69,10 +70,41 @@ def obtener_reserva_ruta(id_reserva: int):
 
 @reserva_bp.route('/<int:id_reserva>', methods=['PUT'])
 def actualizar_reserva_ruta(id_reserva: int):
+    """
+    Actualiza una reserva. Si el body incluye 'estado' con alguno de:
+    - 'sin asistencia'  (regla: sanción solo si NADIE asistió)
+    - 'finalizada'      (opcional: lo tratamos como cierre y revisamos sanción)
+    - 'cerrada'         (opcional: idem)
+    entonces se evalúa y aplican sanciones según la regla pedida.
+    """
     datos = request.get_json() or {}
     try:
+        # 1) Actualizamos la reserva
         filas_afectadas = actualizar_reserva(id_reserva, datos)
-        return jsonify({'reservas_actualizadas': filas_afectadas}), 200
+
+        # 2) Si el estado nuevo indica cierre/ausencia, aplicamos la regla de sanción
+        estado_nuevo = (datos.get('estado') or '').strip().lower()
+        debe_aplicar_sancion = estado_nuevo in ('sin asistencia', 'finalizada', 'cerrada')
+
+        respuesta = {'reservas_actualizadas': filas_afectadas}
+
+        if debe_aplicar_sancion:
+            try:
+                resultado = aplicar_sanciones_por_reserva(id_reserva, sancion_dias=7)
+                respuesta['sanciones'] = {
+                    'aplicadas': resultado.get('insertadas', 0),
+                    'sancionados': resultado.get('sancionados', []),
+                    'fecha_inicio': str(resultado.get('fecha_inicio')),
+                    'fecha_fin': str(resultado.get('fecha_fin')),
+                    'motivo': resultado.get('motivo')
+                }
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
+            except Exception as e:
+                respuesta['sanciones_error'] = str(e)
+
+        return jsonify(respuesta), 200
+
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
