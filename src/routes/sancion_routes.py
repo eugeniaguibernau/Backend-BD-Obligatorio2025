@@ -21,6 +21,7 @@ def _parse_date(s: str):
 
 
 @sancion_bp.route("/", methods=["GET"])
+@jwt_required
 def listar_sanciones_ruta():
     """
     GET /sanciones?ci=123&activas=true

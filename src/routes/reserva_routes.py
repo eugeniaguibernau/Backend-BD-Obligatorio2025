@@ -10,6 +10,7 @@ from src.models.reserva_model import (
     marcar_asistencia
 )
 from src.models.sancion_model import aplicar_sanciones_por_reserva
+from src.auth.jwt_utils import jwt_required
 
 reserva_bp = Blueprint('reserva_bp', __name__)
 
@@ -46,6 +47,7 @@ def crear_reserva_ruta():
 
 
 @reserva_bp.route('/', methods=['GET'])
+@jwt_required
 def listar_reservas_ruta():
     ci_participante = request.args.get('ci_participante')
     nombre_sala = request.args.get('nombre_sala')
@@ -59,6 +61,7 @@ def listar_reservas_ruta():
 
 
 @reserva_bp.route('/<int:id_reserva>', methods=['GET'])
+@jwt_required
 def obtener_reserva_ruta(id_reserva: int):
     try:
         reserva = obtener_reserva(id_reserva)

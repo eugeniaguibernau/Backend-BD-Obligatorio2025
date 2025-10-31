@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from src.config.database import execute_query
+from src.auth.jwt_utils import jwt_required
 
 reports_bp = Blueprint('reports_bp', __name__)
 """
@@ -7,6 +8,7 @@ reports_bp = Blueprint('reports_bp', __name__)
     """
 
 @reports_bp.route('/most-reserved-rooms', methods=['GET'])
+@jwt_required
 def most_reserved_rooms():
     """
     Consulta: Salas más reservadas
@@ -65,6 +67,7 @@ def most_reserved_rooms():
 
 
 @reports_bp.route('/most-demanded-turns', methods=['GET'])
+@jwt_required
 def most_demanded_turns():
     """
     Consulta: Turnos más demandados
@@ -114,6 +117,7 @@ def most_demanded_turns():
 
 
 @reports_bp.route('/avg-participants-by-room', methods=['GET'])
+@jwt_required
 def avg_participants_by_room():
     """
     Consulta: Promedio de participantes por sala
@@ -188,6 +192,7 @@ def avg_participants_by_room():
 
 
 @reports_bp.route('/reservations-by-program', methods=['GET'])
+@jwt_required
 def reservations_by_program():
     """
     Consulta: Cantidad de reservas por carrera y facultad
@@ -247,6 +252,7 @@ def reservations_by_program():
 
 
 @reports_bp.route('/occupancy-by-building', methods=['GET'])
+@jwt_required
 def occupancy_by_building():
     """
     Consulta: Porcentaje de ocupación de salas por edificio
@@ -310,6 +316,7 @@ def occupancy_by_building():
 
 
 @reports_bp.route('/reservations-and-attendance-by-role', methods=['GET'])
+@jwt_required
 def reservations_and_attendance_by_role():
     """
     Consulta: Cantidad de reservas y asistencias de profesores y alumnos (grado y posgrado)
@@ -375,6 +382,7 @@ def reservations_and_attendance_by_role():
 
 
 @reports_bp.route('/sanctions-by-role', methods=['GET'])
+@jwt_required
 def sanctions_by_role():
     """
     Consulta: Cantidad de sanciones por rol y tipo de programa (alumno/docente x grado/posgrado)
@@ -424,6 +432,7 @@ def sanctions_by_role():
 
 
 @reports_bp.route('/used-vs-cancelled', methods=['GET'])
+@jwt_required
 def used_vs_cancelled():
     """
     Consulta: Porcentaje de reservas efectivamente utilizadas vs canceladas/no asistidas

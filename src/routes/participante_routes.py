@@ -11,6 +11,7 @@ from src.models.participante_model import (
     get_participante_sanciones,
 )
 from src.utils.response import with_auth_link
+from src.auth.jwt_utils import jwt_required
 
 participante_bp = Blueprint('participante_bp', __name__)
 
@@ -71,6 +72,7 @@ def create_participante_route():
 
 
 @participante_bp.route('/', methods=['GET'])
+@jwt_required
 def list_participantes_route():
     """
     Lista todos los participantes.
@@ -110,6 +112,7 @@ def list_participantes_route():
 
 
 @participante_bp.route('/<int:ci>', methods=['GET'])
+@jwt_required
 def get_participante_route(ci: int):
     """
     Obtiene un participante por CI.
@@ -224,6 +227,7 @@ def delete_participante_route(ci: int):
 
 
 @participante_bp.route('/<int:ci>/sanciones', methods=['GET'])
+@jwt_required
 def get_sanciones_route(ci: int):
     """
     Obtiene todas las sanciones de un participante.
@@ -311,6 +315,7 @@ def create_participante_route():
 
 
 @participante_bp.route('/', methods=['GET'])
+@jwt_required
 def list_participantes_route():
     """Lista todos los participantes.
 
@@ -347,6 +352,7 @@ def list_participantes_route():
 
 
 @participante_bp.route('/<int:ci>', methods=['GET'])
+@jwt_required
 def get_participante_route(ci: int):
     """Obtiene un participante por CI.
 
@@ -438,6 +444,7 @@ def delete_participante_route(ci: int):
 
 
 @participante_bp.route('/<int:ci>/sanciones', methods=['GET'])
+@jwt_required
 def get_sanciones_route(ci: int):
     """Obtiene todas las sanciones de un participante."""
     try:

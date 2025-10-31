@@ -8,6 +8,7 @@ from src.models.sql_sala import (
     delete_sala,
     VALID_TIPOS,
 )
+from src.auth.jwt_utils import jwt_required
 
 sala_bp = Blueprint('sala_bp', __name__)
 
@@ -32,6 +33,7 @@ def create_sala_route():
 
 
 @sala_bp.route('/', methods=['GET'])
+@jwt_required
 def list_salas_route():
     edificio = request.args.get('edificio')
     tipo = request.args.get('tipo_sala')
@@ -53,6 +55,7 @@ def list_salas_route():
 
 
 @sala_bp.route('/<edificio>/<nombre_sala>', methods=['GET'])
+@jwt_required
 def get_sala_route(edificio: str, nombre_sala: str):
     try:
         row = get_sala(nombre_sala, edificio)
