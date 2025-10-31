@@ -7,14 +7,18 @@ from src.models.sancion_model import (
     eliminar_sancion,
     aplicar_sanciones_por_reserva,
 )
+from src.utils.response import with_auth_link
+from src.auth.jwt_utils import jwt_required
 
 sancion_bp = Blueprint("sancion_bp", __name__)
+
 
 def _parse_date(s: str):
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD.")
+
 
 @sancion_bp.route("/", methods=["GET"])
 def listar_sanciones_ruta():
@@ -25,11 +29,13 @@ def listar_sanciones_ruta():
     activas = request.args.get("activas", default="false").lower() in ("1", "true", "t", "yes", "y")
     try:
         data = listar_sanciones(ci_participante=ci, solo_activas=activas)
-        return jsonify({"sanciones": data}), 200
+        return jsonify(with_auth_link({"sanciones": data})), 200
     except Exception as e:
         return jsonify({"error": "Error interno", "detalle": str(e)}), 500
 
+
 @sancion_bp.route("/", methods=["POST"])
+@jwt_required
 def crear_sancion_ruta():
     """
     Body JSON: { "ci_participante": 123, "fecha_inicio":"YYYY-MM-DD", "fecha_fin":"YYYY-MM-DD" }
@@ -49,7 +55,9 @@ def crear_sancion_ruta():
     except Exception as e:
         return jsonify({"error": "Error interno", "detalle": str(e)}), 500
 
+
 @sancion_bp.route("/", methods=["DELETE"])
+@jwt_required
 def eliminar_sancion_ruta():
     """
     Body JSON: { "ci_participante": 123, "fecha_inicio":"YYYY-MM-DD", "fecha_fin":"YYYY-MM-DD" }
@@ -72,7 +80,9 @@ def eliminar_sancion_ruta():
     except Exception as e:
         return jsonify({"error": "Error interno", "detalle": str(e)}), 500
 
+
 @sancion_bp.route("/aplicar/<int:id_reserva>", methods=["POST"])
+@jwt_required
 def aplicar_por_reserva_ruta(id_reserva: int):
     """
     Aplica la regla: sancionar a todos SOLO si nadie asistió.

@@ -1,4 +1,9 @@
 from flask import Flask, jsonify
+import os
+
+# Extensions
+from src.extensions import limiter
+from src.auth.jwt_utils import JWT_SECRET
 
 
 def create_app(config_object=None):
@@ -6,6 +11,14 @@ def create_app(config_object=None):
 
 	if config_object:
 		app.config.from_object(config_object)
+
+	# Inicializar extensiones
+	limiter.init_app(app)
+
+	# Safety check: evitar arrancar en producción con la clave por defecto
+	env = os.environ.get('FLASK_ENV') or app.config.get('ENV')
+	if (env and env.lower() == 'production') and JWT_SECRET == 'dev-secret':
+		raise RuntimeError('JWT_SECRET no debe ser el valor por defecto en producción. Configure la variable de entorno JWT_SECRET')
 
 	# Blueprints: registrar rutas de los módulos (esto es a lo que después llamamos como endpoints del front)
 	from src.routes.sala_routes import sala_bp
@@ -16,6 +29,10 @@ def create_app(config_object=None):
 	# Registrar rutas de reserva
 	from src.routes.reserva_routes import reserva_bp
 	app.register_blueprint(reserva_bp, url_prefix='/reservas')
+
+	# Registrar rutas de sanciones
+	from src.routes.sancion_routes import sancion_bp
+	app.register_blueprint(sancion_bp, url_prefix='/sanciones')
 
 	# Registrar rutas de auth (register/login)
 	from src.routes.auth_routes import auth_bp

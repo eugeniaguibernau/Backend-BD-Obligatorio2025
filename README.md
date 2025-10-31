@@ -161,6 +161,33 @@ python scripts\check_hashes.py
 Buenas prácticas
 
 - No versionar archivos con credenciales (.env). Los scripts usan variables de entorno.
+
+### Configurar `JWT_SECRET` para el equipo
+
+Para que todos los compañeros arranquen la app fácilmente sin subir secretos al repo, hay un archivo de ejemplo `.env.example` en la raíz.
+
+- Flujo recomendado:
+  1. Copiar `.env.example` a `.env` y editar los valores locales.
+  2. Generar una clave segura para `JWT_SECRET` y pegarla en `.env`.
+
+- Comandos de ejemplo:
+
+PowerShell (Windows):
+
+```powershell
+Copy-Item .env.example .env
+# Generar una clave y pegarla en .env o exportarla para la sesión actual
+$env:JWT_SECRET = (python -c "import secrets; print(secrets.token_urlsafe(48))")
+```
+
+bash / macOS / Linux:
+
+```bash
+cp .env.example .env
+export JWT_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+```
+
+Nota: `docker-compose.yml` ya carga `.env` para el servicio `app` (`env_file: - .env`). No subas `.env` al repo — está en `.gitignore`.
 - Hacer backup externo antes de operaciones destructivas si los datos son críticos.
 - Si la BD contiene hashes en otros formatos (por ejemplo `pbkdf2:`), adaptá el script antes de ejecutar `--apply` para no re-hashear hashes.
 - Considerar colocar herramientas administrativas en una rama `ops` si preferís mantener la rama principal limpia.
@@ -314,9 +341,45 @@ curl -X POST http://127.0.0.1:5000/api/auth/login \
   -d '{"correo":"eugenia123@gmail.com","contraseña":"secreto123"}'
 ```
 
+# PowerShell (Windows) — ejemplo seguro UTF-8
+El ejemplo muestra cómo crear un usuario (register) y obtener un JWT (login) desde PowerShell enviando el JSON correctamente en UTF‑8
+
+En PowerShell el cmdlet puede enviar el body en UTF-16 por defecto, lo que rompe el parseo JSON en Flask. Usá este patrón para enviar JSON como UTF-8 (funciona en Windows PowerShell):
+
+```powershell
+# payload
+$payload = @{
+  correo = 'try1@example.com'
+  'contraseña' = 'secreto123'
+  participante = @{ ci = 77777777; nombre = 'T'; apellido = 'A' }
+}
+$json = $payload | ConvertTo-Json -Depth 5
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+
+# register
+Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:5000/api/auth/register' `
+  -Headers @{ 'Content-Type' = 'application/json; charset=utf-8' } -Body $bytes
+
+# login
+$payload2 = @{ correo='try1@example.com'; 'contraseña'='secreto123' }
+$json2 = $payload2 | ConvertTo-Json -Depth 5
+$bytes2 = [System.Text.Encoding]::UTF8.GetBytes($json2)
+$resp = Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:5000/api/auth/login' `
+  -Headers @{ 'Content-Type' = 'application/json; charset=utf-8' } -Body $bytes2
+$token = $resp.token
+$token  # muestra el JWT
+```
+
 Notas de seguridad
 - En un sistema real conviene devolver un token (por ejemplo JWT) en lugar de sólo un ok/false y proteger endpoints sensibles.
-- No expongas `/api/auth/register` ni `/api/auth/login` sin medidas de seguridad en producción (rate limiting, TLS, validación de inputs, autenticación para creación automática de usuarios, etc.).
+- No expongas `/api/auth/register` ni `/api/auth/login` sin medidas de seguridad en producción (TLS, validación de inputs, autenticación para creación automática de usuarios, etc.).
+
+Cambios de seguridad aplicados en este repositorio
+- Se añadió rate-limiting en los endpoints de autenticación: `/api/auth/login` (5 intentos/minuto por IP) y `/api/auth/register` (2 intentos/minuto por IP). Esto protege contra intentos de fuerza bruta en entornos de desarrollo y en despliegues sencillos.
+- La app ahora valida que la variable de entorno `JWT_SECRET` no sea el valor por defecto (`dev-secret`) cuando se ejecuta con `FLASK_ENV=production`. Asegurate de configurar `JWT_SECRET` fuerte en producción antes de arrancar.
+
+Notas operativas importantes
+- Para desarrollo local podés usar los rate-limits en memoria (ya activados). Para entornos con múltiples instancias/procesos se recomienda configurar un backend distribuido (por ejemplo Redis) para `Flask-Limiter`.
 
 
 # Cambios recientes: JWT y helper de respuesta
@@ -334,5 +397,3 @@ Notas operativas:
 Docker/requirements:
 - Se actualizó el `Dockerfile` para instalar dependencias de compilación necesarias por `bcrypt` (por ejemplo `build-essential`, `libssl-dev`, `libffi-dev`) antes de `pip install`, ya que la imagen `python:3.12-slim` requiere estas librerías para compilar la extensión nativa.
 - `requirements.txt` incluye `bcrypt` y `PyJWT` (entre otras). Si reconstruís la imagen, usá `docker-compose up --build app -d`.
-
-Si preferís que esto vaya directamente en `README.md`, lo puedo mover/insertar allí después (tuviste un error al aplicar el parche; puedo intentarlo de nuevo o lo añadimos manualmente).
