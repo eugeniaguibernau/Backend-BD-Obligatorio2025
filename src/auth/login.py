@@ -41,7 +41,6 @@ def authenticate_user(correo: str, plain_password: str):
 
 	conn = get_connection()
 	cur = conn.cursor()
-	# La columna en la tabla se llama 'contraseña' (con ñ) según el esquema; la usamos tal cual
 	cur.execute("SELECT correo, contraseña FROM login WHERE correo = %s", (correo,))
 	row = cur.fetchone()
 	cur.close()
@@ -54,8 +53,4 @@ def authenticate_user(correo: str, plain_password: str):
 	if not verify_password(plain_password, hashed):
 		return False, "Credenciales incorrectas"
 
-	# Nota: esta implementación usa exclusivamente bcrypt; no se intenta
-	# verificar ni migrar hashes antiguos aquí. Si tus usuarios tienen hashes
-	# de otros formatos, deberán ser migrados manualmente o implementar una
-	# ruta de migración aparte.
 	return True, {"correo": correo}

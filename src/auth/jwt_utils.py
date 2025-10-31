@@ -15,7 +15,6 @@ def create_token(subject: str) -> str:
         'exp': now + timedelta(hours=JWT_EXP_HOURS)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    # In PyJWT >=2.x, jwt.encode returns a str
     return token
 
 
