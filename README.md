@@ -319,3 +319,20 @@ Notas de seguridad
 - No expongas `/api/auth/register` ni `/api/auth/login` sin medidas de seguridad en producción (rate limiting, TLS, validación de inputs, autenticación para creación automática de usuarios, etc.).
 
 
+# Cambios recientes: JWT y helper de respuesta
+
+Se añadieron pequeñas utilidades y cambios orientados a facilitar la autenticación por token en entornos de desarrollo y pruebas:
+
+- `src/auth/jwt_utils.py`: helpers para crear y verificar JSON Web Tokens (JWT). El token contiene el campo `sub` con el correo del usuario, `iat` y `exp`. La clave y tiempo de expiración están controlados por las variables de entorno `JWT_SECRET` y `JWT_EXP_HOURS`.
+- `src/utils/response.py`: helper `with_auth_link(payload)` que inyecta en las respuestas GET un campo `auth_login_url` apuntando a `/api/auth/login` para facilitar la obtención del token desde clientes.
+- `src/routes/auth_routes.py`: se añadió `POST /api/auth/register` y `POST /api/auth/login`. El `login` devuelve el JWT en el campo `token` junto con `ok`/`data`.
+
+Notas operativas:
+- Para generar/usar tokens en desarrollo, llamá `POST /api/auth/login` con `{ "correo":..., "contraseña":... }` y usá el JWT recibido en el header `Authorization: Bearer <token>` para endpoints que lo soporten.
+- Por ahora los endpoints GET devuelven `auth_login_url` como pista; la protección real (verificar JWT en rutas) se puede añadir progresivamente según convenga.
+
+Docker/requirements:
+- Se actualizó el `Dockerfile` para instalar dependencias de compilación necesarias por `bcrypt` (por ejemplo `build-essential`, `libssl-dev`, `libffi-dev`) antes de `pip install`, ya que la imagen `python:3.12-slim` requiere estas librerías para compilar la extensión nativa.
+- `requirements.txt` incluye `bcrypt` y `PyJWT` (entre otras). Si reconstruís la imagen, usá `docker-compose up --build app -d`.
+
+Si preferís que esto vaya directamente en `README.md`, lo puedo mover/insertar allí después (tuviste un error al aplicar el parche; puedo intentarlo de nuevo o lo añadimos manualmente).

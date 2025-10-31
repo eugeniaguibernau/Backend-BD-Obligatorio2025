@@ -66,9 +66,7 @@ def login():
 
     ok, payload = authenticate_user(correo, plain)
     if not ok:
-        # payload is an error message
         return jsonify({"ok": False, "mensaje": payload}), 401
 
-    # Create JWT token and return it with the response
     token = create_token(correo)
     return jsonify({"ok": True, "data": payload, "token": token}), 200
