@@ -335,8 +335,7 @@ def reservations_and_attendance_by_role():
     query = """
         SELECT 
             ppa.rol, pa.tipo as tipo_programa, COUNT(DISTINCT rp.ci_participante) as participantes_unicos,
-            COUNT(DISTINCT rp.id_reserva) as total_reservas, SUM(rp.asistencia = true) as total_asistencias,
-            SUM(rp.asistencia = false) as total_inasistencias, SUM(rp.asistencia IS NULL) as asistencias_sin_registrar
+            COUNT(DISTINCT rp.id_reserva) as total_reservas
         FROM participante_programa_academico ppa
         JOIN programa_academico pa ON ppa.nombre_programa = pa.nombre_programa
         JOIN reserva_participante rp ON ppa.ci_participante = rp.ci_participante
@@ -372,6 +371,47 @@ def reservations_and_attendance_by_role():
     
     try:
         results = execute_query(query, tuple(params) if params else None)
+        
+        # Calcular asistencias en Python para cada grupo
+        for row in results:
+            rol_filter = row['rol']
+            tipo_filter = row['tipo_programa']
+            
+            # Query para contar asistencias por tipo
+            asistencia_query = """
+                SELECT COUNT(*) as total, rp.asistencia
+                FROM participante_programa_academico ppa
+                JOIN programa_academico pa ON ppa.nombre_programa = pa.nombre_programa
+                JOIN reserva_participante rp ON ppa.ci_participante = rp.ci_participante
+                JOIN reserva r ON rp.id_reserva = r.id_reserva
+                WHERE ppa.rol = %s AND pa.tipo = %s
+            """
+            
+            asistencia_params = [rol_filter, tipo_filter]
+            
+            if start_date:
+                asistencia_query += " AND r.fecha >= %s"
+                asistencia_params.append(start_date)
+            
+            if end_date:
+                asistencia_query += " AND r.fecha <= %s"
+                asistencia_params.append(end_date)
+            
+            asistencia_query += " GROUP BY rp.asistencia"
+            
+            asistencia_results = execute_query(asistencia_query, tuple(asistencia_params))
+            
+            row['total_asistencias'] = 0
+            row['total_inasistencias'] = 0
+            row['asistencias_sin_registrar'] = 0
+            
+            for asist_row in asistencia_results:
+                if asist_row['asistencia'] == 1 or asist_row['asistencia'] is True:
+                    row['total_asistencias'] = asist_row['total']
+                elif asist_row['asistencia'] == 0 or asist_row['asistencia'] is False:
+                    row['total_inasistencias'] = asist_row['total']
+                elif asist_row['asistencia'] is None:
+                    row['asistencias_sin_registrar'] = asist_row['total']
         from src.utils.response import with_auth_link
         return jsonify(with_auth_link({
             'reservas_y_asistencias_por_rol': results,
@@ -444,12 +484,24 @@ def used_vs_cancelled():
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
 
-    query = """
-        SELECT
-            SUM(CASE WHEN r.estado = 'finalizada' THEN 1 ELSE 0 END) as used,
-            SUM(CASE WHEN r.estado IN ('cancelada','sin asistencia') THEN 1 ELSE 0 END) as cancelled_or_no_show,
-            COUNT(*) as total_reservas
+    # Query para contar total de reservas
+    query_total = """
+        SELECT COUNT(*) as total_reservas
         FROM reserva r
+    """
+    
+    # Query para contar finalizadas
+    query_used = """
+        SELECT COUNT(*) as used
+        FROM reserva r
+        WHERE r.estado = 'finalizada'
+    """
+    
+    # Query para contar canceladas o sin asistencia
+    query_cancelled = """
+        SELECT COUNT(*) as cancelled_or_no_show
+        FROM reserva r
+        WHERE r.estado IN ('cancelada', 'sin asistencia')
     """
 
     filters = []
@@ -463,17 +515,22 @@ def used_vs_cancelled():
         filters.append("r.fecha <= %s")
         params.append(end_date)
 
+    # Agregar filtros a cada query
     if filters:
-        query += " WHERE " + " AND ".join(filters)
+        filter_clause = " AND " + " AND ".join(filters)
+        query_used += filter_clause
+        query_cancelled += filter_clause
+        query_total += " WHERE " + " AND ".join(filters)
 
     try:
-        rows = execute_query(query, tuple(params) if params else None)
-        # execute_query returns a list of rows; for an aggregate query we expect one row
-        row = rows[0] if rows else {'used': 0, 'cancelled_or_no_show': 0, 'total_reservas': 0}
-
-        used = int(row.get('used', 0) or 0)
-        cancelled = int(row.get('cancelled_or_no_show', 0) or 0)
-        total = int(row.get('total_reservas', 0) or 0)
+        # Ejecutar las tres queries
+        total_result = execute_query(query_total, tuple(params) if params else None)
+        used_result = execute_query(query_used, tuple(params) if params else None)
+        cancelled_result = execute_query(query_cancelled, tuple(params) if params else None)
+        
+        total = int(total_result[0]['total_reservas']) if total_result else 0
+        used = int(used_result[0]['used']) if used_result else 0
+        cancelled = int(cancelled_result[0]['cancelled_or_no_show']) if cancelled_result else 0
 
         if total > 0:
             pct_used = round((used / total) * 100, 2)
