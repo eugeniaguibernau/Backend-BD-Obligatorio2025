@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 from src.models.reserva_model import (
     crear_reserva,
@@ -11,6 +11,8 @@ from src.models.reserva_model import (
 )
 from src.models.sancion_model import aplicar_sanciones_por_reserva
 from src.auth.jwt_utils import jwt_required
+from src.middleware.permissions import require_admin
+from src.config.database import execute_query
 
 reserva_bp = Blueprint('reserva_bp', __name__)
 
@@ -53,6 +55,10 @@ def listar_reservas_ruta():
     nombre_sala = request.args.get('nombre_sala')
 
     try:
+        # Control de acceso: participantes solo ven sus propias reservas
+        if g.user_type != 'admin':
+            ci_participante = g.user_id  # Forzar filtro por CI del participante logueado
+        
         reservas = listar_reservas(ci_participante=ci_participante, nombre_sala=nombre_sala)
         from src.utils.response import with_auth_link
         return jsonify(with_auth_link({'reservas': reservas})), 200
@@ -67,6 +73,15 @@ def obtener_reserva_ruta(id_reserva: int):
         reserva = obtener_reserva(id_reserva)
         if not reserva:
             return jsonify({'error': 'Reserva no encontrada'}), 404
+        
+        # Control de acceso: participantes solo pueden ver sus propias reservas
+        if g.user_type != 'admin':
+            # Verificar que el participante está en esta reserva
+            query = "SELECT COUNT(*) as count FROM reserva_participante WHERE id_reserva = %s AND ci_participante = %s"
+            resultado = execute_query(query, (id_reserva, g.user_id), role='readonly')
+            if not resultado or resultado[0]['count'] == 0:
+                return jsonify({'error': 'No tienes permiso para ver esta reserva'}), 403
+        
         from src.utils.response import with_auth_link
         return jsonify(with_auth_link({'reserva': reserva})), 200
     except Exception as e:
@@ -74,6 +89,7 @@ def obtener_reserva_ruta(id_reserva: int):
 
 
 @reserva_bp.route('/<int:id_reserva>', methods=['PUT'])
+@jwt_required
 def actualizar_reserva_ruta(id_reserva: int):
     """
     Actualiza una reserva. Si el body incluye 'estado' con alguno de:
@@ -84,6 +100,13 @@ def actualizar_reserva_ruta(id_reserva: int):
     """
     datos = request.get_json() or {}
     try:
+        # Control de acceso: verificar que el participante está en esta reserva o es admin
+        if g.user_type != 'admin':
+            query = "SELECT COUNT(*) as count FROM reserva_participante WHERE id_reserva = %s AND ci_participante = %s"
+            resultado = execute_query(query, (id_reserva, g.user_id), role='readonly')
+            if not resultado or resultado[0]['count'] == 0:
+                return jsonify({'error': 'No tienes permiso para modificar esta reserva'}), 403
+        
         # 1) Actualizamos la reserva
         filas_afectadas = actualizar_reserva(id_reserva, datos)
 
@@ -117,6 +140,8 @@ def actualizar_reserva_ruta(id_reserva: int):
 
 
 @reserva_bp.route('/<int:id_reserva>', methods=['DELETE'])
+@jwt_required
+@require_admin
 def eliminar_reserva_ruta(id_reserva: int):
     try:
         filas_afectadas = eliminar_reserva(id_reserva)
@@ -126,11 +151,16 @@ def eliminar_reserva_ruta(id_reserva: int):
 
 
 @reserva_bp.route('/<int:id_reserva>/participantes/<int:ci>/asistencia', methods=['POST'])
+@jwt_required
 def marcar_asistencia_ruta(id_reserva: int, ci: int):
     datos = request.get_json() or {}
     if 'asistencia' not in datos:
         return jsonify({'error': 'Falta campo asistencia (true/false)'}), 400
     try:
+        # Control de acceso: solo admin puede marcar asistencia
+        if g.user_type != 'admin':
+            return jsonify({'error': 'Solo administradores pueden marcar asistencia'}), 403
+        
         asistencia = bool(datos.get('asistencia'))
         filas = marcar_asistencia(id_reserva, ci, asistencia)
         if filas == 0:

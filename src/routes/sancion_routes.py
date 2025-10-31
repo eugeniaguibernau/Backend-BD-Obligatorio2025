@@ -1,5 +1,5 @@
 # src/routes/sancion_routes.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 from src.models.sancion_model import (
     crear_sancion,
@@ -9,6 +9,7 @@ from src.models.sancion_model import (
 )
 from src.utils.response import with_auth_link
 from src.auth.jwt_utils import jwt_required
+from src.middleware.permissions import require_admin
 
 sancion_bp = Blueprint("sancion_bp", __name__)
 
@@ -29,6 +30,10 @@ def listar_sanciones_ruta():
     ci = request.args.get("ci", type=int)
     activas = request.args.get("activas", default="false").lower() in ("1", "true", "t", "yes", "y")
     try:
+        # Control de acceso: participantes solo ven sus propias sanciones
+        if g.user_type != 'admin':
+            ci = g.user_id  # Forzar filtro por CI del participante logueado
+        
         data = listar_sanciones(ci_participante=ci, solo_activas=activas)
         return jsonify(with_auth_link({"sanciones": data})), 200
     except Exception as e:
@@ -37,6 +42,7 @@ def listar_sanciones_ruta():
 
 @sancion_bp.route("/", methods=["POST"])
 @jwt_required
+@require_admin
 def crear_sancion_ruta():
     """
     Body JSON: { "ci_participante": 123, "fecha_inicio":"YYYY-MM-DD", "fecha_fin":"YYYY-MM-DD" }
@@ -59,6 +65,7 @@ def crear_sancion_ruta():
 
 @sancion_bp.route("/", methods=["DELETE"])
 @jwt_required
+@require_admin
 def eliminar_sancion_ruta():
     """
     Body JSON: { "ci_participante": 123, "fecha_inicio":"YYYY-MM-DD", "fecha_fin":"YYYY-MM-DD" }
@@ -84,6 +91,7 @@ def eliminar_sancion_ruta():
 
 @sancion_bp.route("/aplicar/<int:id_reserva>", methods=["POST"])
 @jwt_required
+@require_admin
 def aplicar_por_reserva_ruta(id_reserva: int):
     """
     Aplica la regla: sancionar a todos SOLO si nadie asistió.

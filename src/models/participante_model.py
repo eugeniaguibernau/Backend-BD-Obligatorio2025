@@ -51,7 +51,7 @@ def create_participante(ci: int, nombre: str, apellido: str, email: str) -> int:
     VALUES (%s, %s, %s, %s)
     """
     try:
-        affected = execute_non_query(query, (ci, nombre, apellido, email))
+        affected = execute_non_query(query, (ci, nombre, apellido, email), role='user')
         return affected
     except pymysql.IntegrityError as e:
         if 'Duplicate entry' in str(e):
@@ -65,14 +65,14 @@ def create_participante(ci: int, nombre: str, apellido: str, email: str) -> int:
 def get_participante_by_ci(ci: int) -> Optional[Dict[str, Any]]:
     """Obtiene un participante por CI."""
     query = "SELECT ci, nombre, apellido, email FROM participante WHERE ci=%s"
-    rows = execute_query(query, (ci,))
+    rows = execute_query(query, (ci,), role='readonly')
     return rows[0] if rows else None
 
 
 def get_participante_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Obtiene un participante por email."""
     query = "SELECT ci, nombre, apellido, email FROM participante WHERE email=%s"
-    rows = execute_query(query, (email,))
+    rows = execute_query(query, (email,), role='readonly')
     return rows[0] if rows else None
 
 
@@ -88,7 +88,7 @@ def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None
             query += " OFFSET %s"
             params.append(offset)
     
-    return execute_query(query, tuple(params) if params else None)
+    return execute_query(query, tuple(params) if params else None, role='readonly')
 
 
 def update_participante(ci: int, nombre: Optional[str] = None, 
@@ -135,7 +135,7 @@ def update_participante(ci: int, nombre: Optional[str] = None,
     query = f"UPDATE participante SET {', '.join(sets)} WHERE ci=%s"
     
     try:
-        return execute_non_query(query, tuple(params))
+        return execute_non_query(query, tuple(params), role='user')
     except pymysql.IntegrityError as e:
         if 'Duplicate entry' in str(e) and 'email' in str(e):
             raise ValueError(f"Ya existe un participante con email {email}")
@@ -152,7 +152,7 @@ def delete_participante(ci: int) -> int:
     - No se puede eliminar si tiene sanciones vigentes
     - No se puede eliminar si está en participante_programa_academico
     """
-    conn = get_connection()
+    conn = get_connection('admin')  # DELETE requiere rol admin
     try:
         with conn.cursor() as cur:
             # Verificar si tiene login
@@ -202,7 +202,7 @@ def get_participante_with_programs(ci: int) -> Optional[Dict[str, Any]]:
     LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
     WHERE p.ci = %s
     """
-    rows = execute_query(query, (ci,))
+    rows = execute_query(query, (ci,), role='readonly')
     
     if not rows:
         return None
@@ -236,4 +236,4 @@ def get_participante_sanciones(ci: int) -> List[Dict[str, Any]]:
     WHERE ppa.ci_participante = %s
     ORDER BY sp.fecha_inicio DESC
     """
-    return execute_query(query, (ci,))
+    return execute_query(query, (ci,), role='readonly')

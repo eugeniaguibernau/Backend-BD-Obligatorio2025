@@ -31,7 +31,7 @@ def register():
     if not ok:
         return jsonify({"ok": False, "mensaje": msg}), 400
 
-    conn = get_connection()
+    conn = get_connection('user')  # Usar usuario con permisos de INSERT/UPDATE
     cur = conn.cursor()
 
     # Preparar datos del participante
@@ -116,5 +116,15 @@ def login():
     if not ok:
         return jsonify({"ok": False, "mensaje": payload}), 401
 
-    token = create_token(correo)
-    return jsonify({"ok": True, "data": payload, "token": token}), 200
+    # Generar token con información del usuario
+    user_type = payload.get('user_type', 'participante')
+    user_id = payload.get('user_id')
+    token = create_token(correo, user_type=user_type, user_id=user_id)
+    
+    return jsonify({
+        "ok": True, 
+        "data": payload, 
+        "token": token,
+        "user_type": user_type,
+        "user_id": user_id
+    }), 200

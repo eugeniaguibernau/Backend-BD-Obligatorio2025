@@ -1,399 +1,567 @@
 # Backend-BD-Obligatorio2025
 
-Proyecto backend para el trabajo práctico. Usando Flask y MySQL.
+Backend del sistema de gestión de reservas de salas universitarias. Implementado con Flask y MySQL.
 
-Setup rápido (macOS / zsh):
+## � Índice
+- [Guía de Instalación y Ejecución Local](#-guía-de-instalación-y-ejecución-local)
+- [Inicio Rápido](#-inicio-rápido)
+- [Estructura del Proyecto](#-estructura-del-proyecto)
+- [Sistema de Seguridad](#-sistema-de-seguridad-3-capas)
+- [API Endpoints](#-api-endpoints)
+- [Ejemplos de Uso](#-ejemplos-de-uso)
+- [Scripts Administrativos](#-scripts-administrativos)
+- [Troubleshooting](#-troubleshooting)
 
-1. Crear y activar un entorno virtual
+---
 
-```zsh
-python3 -m venv .venv
-source .venv/bin/activate
+## 🛠️ Guía de Instalación y Ejecución Local
+
+### Prerrequisitos
+
+Antes de comenzar, asegúrate de tener instalado:
+
+- **Docker Desktop** (recomendado)
+  - [Descargar para Mac](https://www.docker.com/products/docker-desktop)
+  - [Descargar para Windows](https://www.docker.com/products/docker-desktop)
+  - [Descargar para Linux](https://docs.docker.com/desktop/install/linux-install/)
+- **Git** - Para clonar el repositorio
+- **Python 3.12+** (opcional, solo si quieres correr sin Docker)
+- **MySQL 8.0+** (opcional, solo si quieres correr sin Docker)
+
+### Opción 1: Instalación con Docker (Recomendado)
+
+Esta es la forma más sencilla y garantiza que todo funcione correctamente.
+
+#### Paso 1: Clonar el repositorio
+
+```bash
+git clone https://github.com/eugeniaguibernau/Backend-BD-Obligatorio2025.git
+cd Backend-BD-Obligatorio2025
 ```
 
-2. Instalar dependencias
+#### Paso 2: Verificar el archivo .env
 
-```zsh
+El archivo `.env` ya está configurado con valores por defecto. Verifica que contenga:
+
+```env
+# Flask
+FLASK_ENV=development
+FLASK_DEBUG=1
+
+# MySQL Root
+DB_HOST=db
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=rootpassword
+DB_NAME=proyecto
+
+# Usuarios MySQL para seguridad
+DB_READONLY_USER=app_readonly
+DB_READONLY_PASSWORD=readonly_pass_2025
+
+DB_APP_USER=app_user
+DB_APP_PASSWORD=user_pass_2025
+
+DB_ADMIN_USER=app_admin
+DB_ADMIN_PASSWORD=admin_pass_2025
+
+# JWT
+JWT_SECRET=tu_secreto_seguro_aqui
+JWT_EXP_HOURS=24
+```
+
+> **Nota para producción**: Cambia `JWT_SECRET` por un valor seguro antes de desplegar.
+
+#### Paso 3: Levantar los contenedores Docker
+
+```bash
+# Construir y levantar los servicios
+docker-compose up -d
+
+# Verificar que los contenedores estén corriendo
+docker ps
+```
+
+Deberías ver dos contenedores corriendo:
+- `mysql_db` - Base de datos MySQL en puerto 3307
+- `flask_app` - Aplicación Flask en puerto 5000
+
+#### Paso 4: Crear la base de datos y las tablas
+
+```bash
+# Opción A: Crear desde archivo SQL (si tienes el dump completo)
+docker exec -i mysql_db mysql -u root -prootpassword < db/creacionDeTablas.sql
+
+# Opción B: Si ya tienes la BD creada, solo inserta datos de prueba
+docker exec -i mysql_db mysql -u root -prootpassword proyecto < db/insterts.sql
+```
+
+#### Paso 5: Crear usuarios MySQL con privilegios diferenciados
+
+```bash
+docker exec -i mysql_db mysql -u root -prootpassword proyecto < db/create_mysql_users.sql
+```
+
+Este comando crea tres usuarios:
+- `app_readonly` - Solo SELECT (para reportes)
+- `app_user` - SELECT, INSERT, UPDATE (operaciones normales)
+- `app_admin` - ALL PRIVILEGES (operaciones administrativas)
+
+#### Paso 6: Verificar que la aplicación esté corriendo
+
+```bash
+# Opción 1: Con curl
+curl http://localhost:5000/api/reports/most-reserved-rooms
+
+# Opción 2: Abrir en el navegador
+# Visita: http://localhost:5000/api/reports/most-reserved-rooms
+```
+
+Si ves una respuesta JSON, ¡la aplicación está funcionando correctamente! 🎉
+
+#### Paso 7: Ver logs (opcional)
+
+```bash
+# Ver logs de Flask
+docker logs -f flask_app
+
+# Ver logs de MySQL
+docker logs -f mysql_db
+
+# Para salir de los logs presiona: Ctrl+C
+```
+
+### Opción 2: Instalación Sin Docker (Avanzado)
+
+Si prefieres correr la aplicación directamente en tu máquina sin Docker:
+
+#### Paso 1: Instalar MySQL
+
+```bash
+# macOS (con Homebrew)
+brew install mysql@8.0
+brew services start mysql@8.0
+
+# Ubuntu/Debian
+sudo apt-get install mysql-server
+sudo systemctl start mysql
+
+# Windows
+# Descargar instalador desde: https://dev.mysql.com/downloads/installer/
+```
+
+#### Paso 2: Crear la base de datos
+
+```bash
+# Conectarse a MySQL como root
+mysql -u root -p
+
+# Dentro de MySQL, ejecutar:
+CREATE DATABASE proyecto CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+exit;
+
+# Importar las tablas
+mysql -u root -p proyecto < db/creacionDeTablas.sql
+
+# Importar datos de prueba (opcional)
+mysql -u root -p proyecto < db/insterts.sql
+
+# Crear usuarios con privilegios
+mysql -u root -p proyecto < db/create_mysql_users.sql
+```
+
+#### Paso 3: Configurar el entorno Python
+
+```bash
+# Crear entorno virtual
+python3 -m venv venv
+
+# Activar el entorno virtual
+# En macOS/Linux:
+source venv/bin/activate
+
+# En Windows:
+venv\Scripts\activate
+
+# Instalar dependencias
 pip install -r requirements.txt
 ```
 
-3. Configurar variables de entorno (ejemplo con MySQL local)
+#### Paso 4: Configurar variables de entorno
 
-```zsh
-export DB_USER=root
-export DB_PASSWORD=secret
-export DB_HOST=127.0.0.1
-export DB_PORT=3306
-export DB_NAME=obligatorio
-# o export DATABASE_URL='mysql+pymysql://user:pass@host:port/dbname'
+Edita el archivo `.env` y actualiza las credenciales de MySQL:
+
+```env
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=tu_contraseña_mysql
+DB_NAME=proyecto
+
+# ... resto de las variables igual
 ```
 
-4. Ejecutar la app
+#### Paso 5: Ejecutar la aplicación
 
-```zsh
+```bash
 python app.py
 ```
 
-La app expondrá /health para comprobar que está levantada.
+La aplicación estará disponible en `http://localhost:5000`
 
-## Cómo probar los endpoints de Reserva (paso a paso)
+### Comandos Útiles
 
-Estos pasos asumen que usás el `docker-compose.yml` del proyecto (el servicio MySQL está mapeado en el puerto 3307 y la app en el puerto 5000). Ajustá host/puerto si corres la app de otra forma.
+#### Docker
 
-1) Levantar los servicios (en la carpeta del proyecto):
+```bash
+# Detener los contenedores
+docker-compose down
 
-```powershell
+# Reiniciar los contenedores
+docker-compose restart
+
+# Reconstruir las imágenes (si cambias Dockerfile o requirements.txt)
+docker-compose up -d --build
+
+# Ver estado de los contenedores
+docker-compose ps
+
+# Acceder a la consola de MySQL
+docker exec -it mysql_db mysql -u root -prootpassword proyecto
+
+# Acceder a la consola del contenedor Flask
+docker exec -it flask_app bash
+```
+
+#### Base de Datos
+
+```bash
+# Backup de la base de datos
+docker exec mysql_db mysqldump -u root -prootpassword proyecto > backup.sql
+
+# Restaurar backup
+docker exec -i mysql_db mysql -u root -prootpassword proyecto < backup.sql
+
+# Ver usuarios MySQL creados
+docker exec mysql_db mysql -u root -prootpassword -e "SELECT user, host FROM mysql.user WHERE user LIKE 'app_%';"
+```
+
+### Verificación de la Instalación
+
+Para verificar que todo está funcionando correctamente, ejecuta estos comandos:
+
+```bash
+# 1. Verificar contenedores Docker
+docker ps | grep -E "mysql_db|flask_app"
+
+# 2. Verificar conexión a MySQL
+docker exec mysql_db mysql -u app_readonly -preadonly_pass_2025 proyecto -e "SELECT 1;"
+
+# 3. Probar endpoint de reportes
+curl http://localhost:5000/api/reports/most-reserved-rooms
+
+# 4. Verificar usuarios MySQL
+docker exec mysql_db mysql -u root -prootpassword proyecto -e "SELECT user FROM mysql.user WHERE user LIKE 'app_%';"
+```
+
+### Solución de Problemas Comunes en la Instalación
+
+#### Error: "Port 3307 is already allocated"
+
+```bash
+# Ver qué está usando el puerto
+lsof -i :3307  # macOS/Linux
+netstat -ano | findstr :3307  # Windows
+
+# Cambiar el puerto en docker-compose.yml:
+ports:
+  - "3308:3306"  # Usar otro puerto
+```
+
+#### Error: "Cannot connect to MySQL"
+
+```bash
+# Esperar a que MySQL esté listo (puede tomar 10-15 segundos)
+docker logs mysql_db
+
+# Si sigue fallando, reiniciar el contenedor
+docker-compose restart db
+```
+
+#### Error: "Module not found" en Flask
+
+```bash
+# Reconstruir la imagen Docker
+docker-compose down
+docker-compose up -d --build
+```
+
+#### El puerto 5000 no responde
+
+```bash
+# Ver los logs de Flask
+docker logs flask_app
+
+# Verificar que Flask esté corriendo
+docker exec flask_app ps aux | grep python
+```
+
+---
+
+## �🚀 Inicio Rápido
+
+### Requisitos Previos
+- Docker y Docker Compose
+- Python 3.12 (si se ejecuta sin Docker)
+
+### Levantar el Sistema con Docker
+
+```bash
+# 1. Levantar los contenedores
 docker-compose up -d
+
+# 2. Crear usuarios MySQL (primera vez)
+docker exec -i mysql_db mysql -u root -prootpassword proyecto < db/create_mysql_users.sql
+
+# 3. Verificar que la aplicación está corriendo
+curl http://localhost:5000/api/reports/most-reserved-rooms
 ```
 
-2) Comprobar que la app y la BD están arriba:
+La aplicación estará disponible en `http://localhost:5000` y MySQL en `localhost:3307`.
 
-```powershell
-#comprobar contenedores
-docker ps --filter "name=mysql_db" --filter "name=flask_app"
-#comprobar health endpoint
-curl http://127.0.0.1:5000/health
+## 📁 Estructura del Proyecto
+
+```
+Backend-BD-Obligatorio2025/
+├── app.py                      # Punto de entrada de la aplicación
+├── docker-compose.yml          # Configuración de Docker
+├── Dockerfile                  # Imagen Docker de la aplicación
+├── requirements.txt            # Dependencias Python
+├── .env                        # Variables de entorno (no versionado)
+├── db/
+│   ├── creacionDeTablas.sql   # Script de creación de tablas
+│   └── create_mysql_users.sql # Script de usuarios MySQL
+├── scripts/
+│   ├── check_hashes.py        # Verificar hashes en BD
+│   └── migrate_passwords_to_bcrypt.py  # Migrar contraseñas
+└── src/
+    ├── auth/                   # Autenticación y JWT
+    │   ├── jwt_utils.py
+    │   └── login.py
+    ├── config/                 # Configuración
+    │   └── database.py
+    ├── middleware/             # Control de permisos
+    │   └── permissions.py
+    ├── models/                 # Lógica de datos
+    │   ├── participante_model.py
+    │   ├── reserva_model.py
+    │   ├── sala_model.py
+    │   └── sancion_model.py
+    ├── routes/                 # Endpoints API
+    │   ├── auth_routes.py
+    │   ├── participante_routes.py
+    │   ├── reports_routes.py
+    │   ├── reserva_routes.py
+    │   ├── sala_routes.py
+    │   └── sancion_routes.py
+    ├── services/               # Lógica de negocio
+    │   ├── reserva_service.py
+    │   └── sancion_service.py
+    └── utils/                  # Utilidades
+        ├── validators.py
+        └── response.py
 ```
 
-3) Listar reservas (GET)
+## 🔐 Sistema de Seguridad (3 Capas)
 
-```powershell
-curl -s http://127.0.0.1:5000/reservas/ | jq
+### 1. Usuarios MySQL con Permisos Diferenciados
+- **app_readonly**: Solo SELECT (reportes y consultas)
+- **app_user**: SELECT, INSERT, UPDATE (operaciones normales)
+- **app_admin**: ALL PRIVILEGES (operaciones administrativas)
+
+### 2. JWT (JSON Web Tokens)
+- Tokens incluyen `user_type` (admin/participante) y `user_id`
+- Expiración configurable vía `JWT_EXP_HOURS`
+
+### 3. Middleware de Permisos
+- `@jwt_required`: Requiere autenticación
+- `@require_admin`: Solo administradores
+- `can_modify_resource()`: Usuario solo modifica sus recursos
+
+## 🔧 Configuración
+
+### Variables de Entorno (.env)
+
+```env
+# Flask
+FLASK_ENV=development
+FLASK_DEBUG=1
+
+# MySQL Root
+DB_HOST=db
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=rootpassword
+DB_NAME=proyecto
+
+# Usuarios MySQL para seguridad
+DB_READONLY_USER=app_readonly
+DB_READONLY_PASSWORD=readonly_pass_2025
+
+DB_APP_USER=app_user
+DB_APP_PASSWORD=user_pass_2025
+
+DB_ADMIN_USER=app_admin
+DB_ADMIN_PASSWORD=admin_pass_2025
+
+# JWT
+JWT_SECRET=tu_secreto_seguro_aqui
+JWT_EXP_HOURS=24
 ```
 
-4) Crear una reserva (POST)
+## 📡 API Endpoints
 
-Request (JSON) — campos requeridos:
-- nombre_sala (string)
-- edificio (string)
-- fecha (YYYY-MM-DD)
-- id_turno (int)
-- participantes (array de CI, enteros)
+### Autenticación
+- `POST /api/auth/register` - Registrar usuario
+- `POST /api/auth/login` - Login (retorna JWT)
 
-Ejemplo:
+### Participantes
+- `GET /api/participantes` - Listar participantes
+- `GET /api/participantes/<ci>` - Obtener participante
+- `POST /api/participantes` - Crear participante
+- `PUT /api/participantes/<ci>` - Actualizar participante
+- `DELETE /api/participantes/<ci>` - Eliminar participante (admin)
 
-```powershell
-curl -X POST http://127.0.0.1:5000/reservas/ \
-	-H "Content-Type: application/json" \
-	-d '{"nombre_sala":"Lab 101","edificio":"Central","fecha":"2025-11-10","id_turno":1,"participantes":[11111111,22222222]}' | jq
-```
+### Salas
+- `GET /api/salas` - Listar salas
+- `GET /api/salas/<edificio>/<nombre>` - Obtener sala
+- `POST /api/salas` - Crear sala (admin)
+- `PUT /api/salas/<edificio>/<nombre>` - Actualizar sala (admin)
+- `DELETE /api/salas/<edificio>/<nombre>` - Eliminar sala (admin)
 
-Respuesta esperada (201):
+### Reservas
+- `GET /api/reservas` - Listar reservas
+- `GET /api/reservas/<id>` - Obtener reserva
+- `POST /api/reservas` - Crear reserva
+- `PUT /api/reservas/<id>` - Actualizar reserva
+- `DELETE /api/reservas/<id>` - Eliminar reserva (admin)
+- `POST /api/reservas/<id>/participantes/<ci>/asistencia` - Marcar asistencia (admin)
 
-```json
-{ "reserva_creada": 123 }
-```
+### Sanciones
+- `GET /api/sanciones` - Listar sanciones
+- `POST /api/sanciones` - Crear sanción (admin)
+- `DELETE /api/sanciones` - Eliminar sanción (admin)
+- `POST /api/sanciones/aplicar/<id_reserva>` - Aplicar sanciones por reserva (admin)
 
-5) Obtener una reserva por id (GET)
+### Reportes (Todos requieren autenticación)
 
-```powershell
-curl http://127.0.0.1:5000/reservas/123
-```
+#### Reportes Requeridos (8)
+- `GET /api/reports/most-reserved-rooms` - Salas más reservadas
+- `GET /api/reports/most-demanded-turns` - Turnos más demandados
+- `GET /api/reports/avg-participants-by-room` - Promedio de participantes por sala
+- `GET /api/reports/reservations-by-program` - Reservas por programa académico y facultad
+- `GET /api/reports/occupancy-by-building` - Porcentaje de ocupación por edificio
+- `GET /api/reports/reservations-and-attendance-by-role` - Reservas y asistencia de profesores/alumnos
+- `GET /api/reports/sanctions-by-role` - Sanciones de profesores/alumnos
+- `GET /api/reports/used-vs-cancelled` - Porcentaje de reservas utilizadas vs canceladas
 
-6) Actualizar una reserva (PUT)
+#### Reportes Adicionales Sugeridos (3)
+- `GET /api/reports/peak-hours-by-room` - Horas pico por sala (turnos más demandados por cada espacio)
+- `GET /api/reports/occupancy-by-room-type` - Porcentaje de ocupación por tipo de sala (eficiencia por categoría)
+- `GET /api/reports/repeat-offenders` - Participantes sancionados por reincidencia (más de una sanción)
 
-Envía un JSON con los campos a actualizar (por ejemplo `estado`):
+## 🧪 Ejemplos de Uso
 
-```powershell
-curl -X PUT http://127.0.0.1:5000/reservas/123 \
-	-H "Content-Type: application/json" \
-	-d '{"estado":"cancelada"}' | jq
-```
-
-7) Eliminar una reserva (DELETE)
-
-```powershell
-curl -X DELETE http://127.0.0.1:5000/reservas/123
-```
-
-Notas importantes
-- Si la DB está corriendo en Docker (como en este repo) el contenedor expone MySQL en el puerto 3307 del host — esa información está en `docker-compose.yml`.
-- Si recibís errores de charset/ñ al ejecutar scripts SQL desde Windows, preferí copiar el archivo dentro del contenedor (`docker cp`) y usar `source` dentro del contenedor con `--default-character-set=utf8mb4`.
-- Para probar rápidamente sin usar curl podés usar el cliente de pruebas de Flask dentro del contenedor (ya lo usamos para tests locales) o herramientas como Postman / Insomnia.
-
-# Scripts: Migración y verificación de hashes
-
-Este archivo explica las utilidades administrativas relacionadas con el hashing de contraseñas.
-
-Archivos disponibles
-
-- `migrate_passwords_to_bcrypt.py` — re-hashea contraseñas en la tabla `login` que estén en texto plano. Dry-run por defecto; pasar `--apply` para aplicar cambios. Crea una tabla backup `login_backup_YYYYMMDDHHMMSS` antes de actualizar.
-- `check_hashes.py` — muestra conteos y ejemplos de hashes en la tabla `login` (útil para comprobar el resultado de la migración).
-
-Por qué existen
-
-- Seguridad: almacenar contraseñas en texto plano es inseguro. Bcrypt es un algoritmo adecuado para contraseñas (salt+cost). Estos scripts permiten migrar datos de ejemplo o BD locales donde las seeds vinieran con contraseñas en claro.
-- Reproducibilidad: permiten repetir la migración en entornos locales y automatizar verificaciones.
-
-Cómo usar (ejemplos)
-
-1) Preparar variables de entorno (ejemplo PowerShell local):
-
-```powershell
-$env:PYTHONPATH='.'
-$env:DB_HOST='127.0.0.1'
-$env:DB_PORT='3307'
-$env:DB_USER='root'
-$env:DB_PASSWORD='rootpassword'
-$env:DB_NAME='proyecto'
-```
-
-2) Dry-run (no modifica la BD):
-
-```powershell
-python scripts\migrate_passwords_to_bcrypt.py
-```
-
-3) Verificar estado:
-
-```powershell
-python scripts\check_hashes.py
-```
-
-4) Aplicar la migración (crea backup y actualiza filas):
-
-```powershell
-# opcional: mysqldump -u root -p proyecto > proyecto_dump.sql
-python scripts\migrate_passwords_to_bcrypt.py --apply
-python scripts\check_hashes.py
-```
-
-Buenas prácticas
-
-- No versionar archivos con credenciales (.env). Los scripts usan variables de entorno.
-
-### Configurar `JWT_SECRET` para el equipo
-
-Para que todos los compañeros arranquen la app fácilmente sin subir secretos al repo, hay un archivo de ejemplo `.env.example` en la raíz.
-
-- Flujo recomendado:
-  1. Copiar `.env.example` a `.env` y editar los valores locales.
-  2. Generar una clave segura para `JWT_SECRET` y pegarla en `.env`.
-
-- Comandos de ejemplo:
-
-PowerShell (Windows):
-
-```powershell
-Copy-Item .env.example .env
-# Generar una clave y pegarla en .env o exportarla para la sesión actual
-$env:JWT_SECRET = (python -c "import secrets; print(secrets.token_urlsafe(48))")
-```
-
-bash / macOS / Linux:
+### Login y obtención de JWT
 
 ```bash
-cp .env.example .env
-export JWT_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
-```
-
-Nota: `docker-compose.yml` ya carga `.env` para el servicio `app` (`env_file: - .env`). No subas `.env` al repo — está en `.gitignore`.
-- Hacer backup externo antes de operaciones destructivas si los datos son críticos.
-- Si la BD contiene hashes en otros formatos (por ejemplo `pbkdf2:`), adaptá el script antes de ejecutar `--apply` para no re-hashear hashes.
-- Considerar colocar herramientas administrativas en una rama `ops` si preferís mantener la rama principal limpia.
-
-Soporte en la app
-
-- La lógica de la aplicación para crear/verificar contraseñas se encuentra en `src/auth/login.py`.
-- Siempre hasheá la contraseña con `hash_password()` antes de hacer `INSERT`/`UPDATE`.
-
-Si querés, puedo intentar insertar automáticamente un puntero en la parte final del `README.md` para enlazar a este archivo (si preferís que quede centralizado). Si preferís, puedo también crear una rama `ops/migrations` y mover `migrate_passwords_to_bcrypt.py` allí.
-
-
-# Cómo funciona el login y cómo crear nuevos usuarios con contraseñas hasheadas
-
-
-- Contrato mínimo (qué hace el código):
-  - Input: `correo` (string) y `contraseña` (string sin hash) para el flujo de creación; para login el endpoint/función recibe `correo` + `contraseña` en claro.
-  - Output: `authenticate_user(correo, contraseña)` retorna `(True, {"correo": ...})` si ok o `(False, "mensaje")` si falla.
-  - Modos de error: usuario no encontrado, credenciales incorrectas, valores nulos.
-
-- Dónde está la lógica:
-  - `src/auth/login.py` contiene `hash_password(plain_password)`, `verify_password(...)` y `authenticate_user(...)`.
-  - `hash_password` usa `bcrypt` y devuelve un string listo para guardar en la DB.
-
-- Reglas importantes:
-  - La tabla `login` tiene una FK `login.correo` -> `participante.email`. Debe existir el participante antes de insertar el login.
-  - Guardá siempre el resultado de `hash_password()` en la columna `contraseña` (se usa el nombre con la ñ tal cual en la DB).
-  - La columna debe tener suficiente longitud (recomendado VARCHAR(128)).
-
-Ejemplos (PowerShell, desde la raíz del repo):
-
-1) Generar un hash bcrypt para la contraseña (imprime el hash en stdout):
-
-```powershell
-$env:PYTHONPATH='.'; python -c "from src.auth.login import hash_password; print(hash_password('secreto123'))"
-```
-
-2) Insertar el participante (si no existe) y luego el login usando el hash obtenido:
-
-```sql
--- Con un cliente MySQL conectado a la BD 'proyecto'
-INSERT INTO participante (email, ci, nombre, apellido) VALUES ('eugenia123@gmail.com', 12345678, 'Eugenia', 'Perez');
-INSERT INTO login (correo, `contraseña`) VALUES ('eugenia123@gmail.com', '<PEGAR_HASH_ACÁ>');
-```
-
-3) Alternativamente, generar el hash e insertar desde Python (usa la helper de conexión del proyecto):
-
-```powershell
-$env:PYTHONPATH='.'; python - <<'PY'
-from src.auth.login import hash_password
-from src.config.database import get_connection
-
-correo = 'eugenia123@gmail.com'
-hash_ = hash_password('secreto123')
-conn = get_connection()
-cur = conn.cursor()
-# Asegurate de que el participante exista; si no, crear uno antes.
-cur.execute("INSERT INTO login (correo, `contraseña`) VALUES (%s, %s)", (correo, hash_))
-conn.commit()
-cur.close()
-conn.close()
-print('Usuario creado o actualizado:', correo)
-PY
-```
-
-Notas y edge-cases (rápido):
-  - Si la tabla `login` ya tiene un registro para ese `correo`, preferí usar `UPDATE` en lugar de `INSERT` para no violar la PK/FK.
-  - Si recibís errores de encoding al pegar hashes en SQL desde Windows, usá el cliente dentro del contenedor Docker o pegá el hash vía un script Python como en el ejemplo anterior.
-  - Si tu BD contiene otros formatos de hash (pbkdf2, sha1, etc.), no llames al migrador `--apply` sin revisar: podrías re-hashear hashes por accidente.
-
-Si querés, puedo:
-- agregar un endpoint `/api/auth/login` que invoque `authenticate_user` y devuelva un JWT,
-- o implementar un helper `create_user(correo, contraseña, participante_data)` en `src/auth` para centralizar la creación segura.
-
-## Cómo crear un usuario con contraseña desde Postman
-
-Si preferís crear usuarios vía HTTP (por ejemplo con Postman) en lugar de ejecutar comandos en la terminal, podés usar el endpoint que añadimos: `POST /api/auth/register`.
-
-1) Asegurate de que la app esté corriendo localmente y que las variables de entorno apunten al servidor MySQL correcto (ej. `DB_HOST=127.0.0.1`, `DB_PORT=3307` si usás Docker con mapeo). Probá `GET /health` para confirmar.
-
-2) En Postman:
-  - Método: POST
-  - URL: http://127.0.0.1:5000/api/auth/register
-  - Headers: `Content-Type: application/json`
-  - Body (raw JSON):
-
-```json
-{
-  "correo": "eugenia123@gmail.com",
-  "contraseña": "secreto123",
-  "participante": { "ci": 44444444, "nombre": "Eugenia", "apellido": "Guibernau" }
-}
-```
-
-3) Respuesta esperada:
-  - 201 Created
-  - Body: `{ "ok": true, "mensaje": "Usuario creado/actualizado" }`
-
-4) Notas de seguridad y buenas prácticas:
-  - No expongas `/api/auth/register` sin protección en producción: implementá autenticación/roles o limitá el endpoint a entornos de desarrollo.
-  - Validá campos en el servidor (email válido, longitud de contraseña mínima) antes de crear registros.
-  - No incluyas ni retornes el hash en las respuestas.
-
-### Para qué sirve `auth_routes` y el cambio en `app.py`
-
-- `src/routes/auth_routes.py` contiene un blueprint (`auth_bp`) que agrupa rutas relacionadas con autenticación y administración de cuentas (en nuestro caso, la ruta `POST /register`). Separar estas rutas en un blueprint mantiene el código organizado y modular.
-- En `app.py` registramos ese blueprint con `app.register_blueprint(auth_bp, url_prefix='/api/auth')`. Eso hace que todas las rutas del blueprint estén disponibles bajo el prefijo `/api/auth`, por ejemplo `/api/auth/register`.
-- Ventajas de usar un blueprint y registrar en `create_app()`:
-  - Las rutas se cargan de forma consistente cuando se crea la app (factory pattern).
-  - Evita definir rutas globales fuera del factory (menos problemas al importar y para testing).
-  - Facilita aplicar middlewares, autenticación o políticas por prefijo.
-
-## Endpoint: Login (/api/auth/login)
-
-También añadimos un endpoint de login mínimo para autenticar usuarios usando la tabla `login`.
-
-Uso desde Postman
-- Método: POST
-- URL: http://127.0.0.1:5000/api/auth/login
-- Headers: `Content-Type: application/json`
-- Body (raw JSON):
-
-```json
-{
-  "correo": "eugenia123@gmail.com",
-  "contraseña": "secreto123"
-}
-```
-
-Respuestas esperadas
-- 200 OK
-  - Body: `{ "ok": true, "data": { "correo": "eugenia123@gmail.com" } }` cuando las credenciales son correctas.
-- 401 Unauthorized
-  - Body: `{ "ok": false, "mensaje": "Credenciales incorrectas" }` cuando la contraseña no coincide.
-- 400 Bad Request
-  - Body: `{ "ok": false, "mensaje": "correo y contraseña requeridos" }` si falta alguno de los campos.
-
-Ejemplos rápidos desde PowerShell / curl
-PowerShell (Invoke-RestMethod):
-
-```powershell
-$json = '{"correo":"eugenia123@gmail.com","contraseña":"secreto123"}'
-Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:5000/api/auth/login' -Headers @{ 'Content-Type' = 'application/json' } -Body $json
-```
-
-curl:
-
-```bash
-curl -X POST http://127.0.0.1:5000/api/auth/login \
+# Login
+curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"correo":"eugenia123@gmail.com","contraseña":"secreto123"}'
+  -d '{"email":"admin@example.com","password":"secret123"}'
+
+# Respuesta: { "token": "eyJ...", "user_type": "admin", "user_id": 123 }
 ```
 
-# PowerShell (Windows) — ejemplo seguro UTF-8
-El ejemplo muestra cómo crear un usuario (register) y obtener un JWT (login) desde PowerShell enviando el JSON correctamente en UTF‑8
+### Uso del JWT en requests
 
-En PowerShell el cmdlet puede enviar el body en UTF-16 por defecto, lo que rompe el parseo JSON en Flask. Usá este patrón para enviar JSON como UTF-8 (funciona en Windows PowerShell):
-
-```powershell
-# payload
-$payload = @{
-  correo = 'try1@example.com'
-  'contraseña' = 'secreto123'
-  participante = @{ ci = 77777777; nombre = 'T'; apellido = 'A' }
-}
-$json = $payload | ConvertTo-Json -Depth 5
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-
-# register
-Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:5000/api/auth/register' `
-  -Headers @{ 'Content-Type' = 'application/json; charset=utf-8' } -Body $bytes
-
-# login
-$payload2 = @{ correo='try1@example.com'; 'contraseña'='secreto123' }
-$json2 = $payload2 | ConvertTo-Json -Depth 5
-$bytes2 = [System.Text.Encoding]::UTF8.GetBytes($json2)
-$resp = Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:5000/api/auth/login' `
-  -Headers @{ 'Content-Type' = 'application/json; charset=utf-8' } -Body $bytes2
-$token = $resp.token
-$token  # muestra el JWT
+```bash
+# Listar participantes (requiere JWT)
+curl http://localhost:5000/api/participantes \
+  -H "Authorization: Bearer eyJ..."
 ```
 
-Notas de seguridad
-- En un sistema real conviene devolver un token (por ejemplo JWT) en lugar de sólo un ok/false y proteger endpoints sensibles.
-- No expongas `/api/auth/register` ni `/api/auth/login` sin medidas de seguridad en producción (TLS, validación de inputs, autenticación para creación automática de usuarios, etc.).
+### Crear una reserva
 
-Cambios de seguridad aplicados en este repositorio
-- Se añadió rate-limiting en los endpoints de autenticación: `/api/auth/login` (5 intentos/minuto por IP) y `/api/auth/register` (2 intentos/minuto por IP). Esto protege contra intentos de fuerza bruta en entornos de desarrollo y en despliegues sencillos.
-- La app ahora valida que la variable de entorno `JWT_SECRET` no sea el valor por defecto (`dev-secret`) cuando se ejecuta con `FLASK_ENV=production`. Asegurate de configurar `JWT_SECRET` fuerte en producción antes de arrancar.
+```bash
+curl -X POST http://localhost:5000/api/reservas \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJ..." \
+  -d '{
+    "nombre_sala": "Lab 101",
+    "edificio": "Central",
+    "fecha": "2025-11-15",
+    "id_turno": 1,
+    "participantes": [12345678, 87654321]
+  }'
+```
 
-Notas operativas importantes
-- Para desarrollo local podés usar los rate-limits en memoria (ya activados). Para entornos con múltiples instancias/procesos se recomienda configurar un backend distribuido (por ejemplo Redis) para `Flask-Limiter`.
+## 🛠️ Scripts Administrativos
 
+### Migrar contraseñas a bcrypt
 
-# Cambios recientes: JWT y helper de respuesta
+```bash
+# Dry-run (no modifica la BD)
+python scripts/migrate_passwords_to_bcrypt.py
 
-Se añadieron pequeñas utilidades y cambios orientados a facilitar la autenticación por token en entornos de desarrollo y pruebas:
+# Aplicar cambios (crea backup automático)
+python scripts/migrate_passwords_to_bcrypt.py --apply
+```
 
-- `src/auth/jwt_utils.py`: helpers para crear y verificar JSON Web Tokens (JWT). El token contiene el campo `sub` con el correo del usuario, `iat` y `exp`. La clave y tiempo de expiración están controlados por las variables de entorno `JWT_SECRET` y `JWT_EXP_HOURS`.
-- `src/utils/response.py`: helper `with_auth_link(payload)` que inyecta en las respuestas GET un campo `auth_login_url` apuntando a `/api/auth/login` para facilitar la obtención del token desde clientes.
-- `src/routes/auth_routes.py`: se añadió `POST /api/auth/register` y `POST /api/auth/login`. El `login` devuelve el JWT en el campo `token` junto con `ok`/`data`.
+### Verificar hashes en la BD
 
-Notas operativas:
-- Para generar/usar tokens en desarrollo, llamá `POST /api/auth/login` con `{ "correo":..., "contraseña":... }` y usá el JWT recibido en el header `Authorization: Bearer <token>` para endpoints que lo soporten.
-- Por ahora los endpoints GET devuelven `auth_login_url` como pista; la protección real (verificar JWT en rutas) se puede añadir progresivamente según convenga.
+```bash
+python scripts/check_hashes.py
+```
 
-Docker/requirements:
-- Se actualizó el `Dockerfile` para instalar dependencias de compilación necesarias por `bcrypt` (por ejemplo `build-essential`, `libssl-dev`, `libffi-dev`) antes de `pip install`, ya que la imagen `python:3.12-slim` requiere estas librerías para compilar la extensión nativa.
-- `requirements.txt` incluye `bcrypt` y `PyJWT` (entre otras). Si reconstruís la imagen, usá `docker-compose up --build app -d`.
+## 🐛 Troubleshooting
+
+### La aplicación no se conecta a MySQL
+```bash
+# Verificar que los contenedores estén corriendo
+docker ps
+
+# Ver logs
+docker logs mysql_db
+docker logs flask_app
+```
+
+### Error de autenticación MySQL
+```bash
+# Recrear usuarios MySQL
+docker exec -i mysql_db mysql -u root -prootpassword proyecto < db/create_mysql_users.sql
+```
+
+### Reiniciar completamente el sistema
+```bash
+docker-compose down
+docker-compose up -d
+docker exec -i mysql_db mysql -u root -prootpassword proyecto < db/create_mysql_users.sql
+```
+
+## 📝 Notas de Desarrollo
+
+- Las contraseñas se almacenan usando bcrypt (nunca en texto plano)
+- Todos los reportes usan el usuario `app_readonly` para máxima seguridad
+- Las operaciones de DELETE usan el usuario `app_admin`
+- Los participantes solo pueden ver/modificar sus propios recursos
+- Los administradores tienen acceso completo a todos los recursos
+
+## 📄 Licencia
+
+Proyecto académico - Universidad ORT Uruguay - 2025
+
+## 📄 Licencia
+
+Proyecto académico - Universidad ORT Uruguay - 2025
+

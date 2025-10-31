@@ -56,7 +56,7 @@ def most_reserved_rooms():
     params.append(limit)
     
     try:
-        results = execute_query(query, tuple(params))
+        results = execute_query(query, tuple(params), role='readonly')
         from src.utils.response import with_auth_link
         return jsonify(with_auth_link({
             'salas_mas_reservadas': results,
@@ -106,7 +106,7 @@ def most_demanded_turns():
     """
     
     try:
-        results = execute_query(query, tuple(params) if params else None)
+        results = execute_query(query, tuple(params) if params else None, role='readonly')
         from src.utils.response import with_auth_link
         return jsonify(with_auth_link({
             'turnos_mas_demandados': results,
@@ -171,7 +171,7 @@ def avg_participants_by_room():
     """
     
     try:
-        results = execute_query(query, tuple(params) if params else None)
+        results = execute_query(query, tuple(params), role='readonly' if params else None)
         
         # Calcular promedios y porcentajes en Python
         for row in results:
@@ -241,7 +241,7 @@ def reservations_by_program():
     """
     
     try:
-        results = execute_query(query, tuple(params) if params else None)
+        results = execute_query(query, tuple(params), role='readonly' if params else None)
         from src.utils.response import with_auth_link
         return jsonify(with_auth_link({
             'reservas_por_programa': results,
@@ -295,7 +295,7 @@ def occupancy_by_building():
     """
     
     try:
-        results = execute_query(query, tuple(params) if params else None)
+        results = execute_query(query, tuple(params), role='readonly' if params else None)
         
         # Calcular ratio y porcentaje en Python
         for row in results:
@@ -370,7 +370,7 @@ def reservations_and_attendance_by_role():
     """
     
     try:
-        results = execute_query(query, tuple(params) if params else None)
+        results = execute_query(query, tuple(params), role='readonly' if params else None)
         
         # Calcular asistencias en Python para cada grupo
         for row in results:
@@ -399,7 +399,7 @@ def reservations_and_attendance_by_role():
             
             asistencia_query += " GROUP BY rp.asistencia"
             
-            asistencia_results = execute_query(asistencia_query, tuple(asistencia_params))
+            asistencia_results = execute_query(asistencia_query, tuple(asistencia_params), role='readonly')
             
             row['total_asistencias'] = 0
             row['total_inasistencias'] = 0
@@ -462,7 +462,7 @@ def sanctions_by_role():
     """
 
     try:
-        results = execute_query(query, tuple(params) if params else None)
+        results = execute_query(query, tuple(params), role='readonly' if params else None)
         return jsonify({
             'sanciones_por_rol': results,
             'total': len(results)
@@ -524,9 +524,9 @@ def used_vs_cancelled():
 
     try:
         # Ejecutar las tres queries
-        total_result = execute_query(query_total, tuple(params) if params else None)
-        used_result = execute_query(query_used, tuple(params) if params else None)
-        cancelled_result = execute_query(query_cancelled, tuple(params) if params else None)
+        total_result = execute_query(query_total, tuple(params), role='readonly' if params else None)
+        used_result = execute_query(query_used, tuple(params), role='readonly' if params else None)
+        cancelled_result = execute_query(query_cancelled, tuple(params), role='readonly' if params else None)
         
         total = int(total_result[0]['total_reservas']) if total_result else 0
         used = int(used_result[0]['used']) if used_result else 0
@@ -545,5 +545,281 @@ def used_vs_cancelled():
             'porcentaje_usadas': pct_used,
             'porcentaje_canceladas_o_no_asistidas': pct_cancelled
         }), 200
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+
+# CONSULTAS ADICIONALES
+
+@reports_bp.route('/peak-hours-by-room', methods=['GET'])
+@jwt_required
+def peak_hours_by_room():
+    """
+    Consulta adicional 1: Horas pico por sala
+    
+    Muestra los turnos más demandados por cada sala, agrupando por sala.
+    Útil para identificar patrones de uso específicos de cada espacio.
+    
+    Query params opcionales:
+    - start_date: fecha inicio (YYYY-MM-DD)
+    - end_date: fecha fin (YYYY-MM-DD)
+    - edificio: filtrar por edificio
+    - limit: número de salas a mostrar (default: todas)
+    """
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    edificio = request.args.get('edificio')
+    limit = request.args.get('limit')
+    
+    query = """
+        SELECT 
+            r.nombre_sala, r.edificio, r.id_turno, t.horario_inicio, t.horario_fin, COUNT(r.id_reserva) as total_reservas,
+            COUNT(DISTINCT r.fecha) as dias_diferentes
+        FROM reserva r
+        JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
+        JOIN turno t ON r.id_turno = t.id_turno
+    """
+    
+    filters = []
+    params = []
+    
+    if start_date:
+        filters.append("r.fecha >= %s")
+        params.append(start_date)
+    
+    if end_date:
+        filters.append("r.fecha <= %s")
+        params.append(end_date)
+    
+    if edificio:
+        filters.append("r.edificio = %s")
+        params.append(edificio)
+    
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
+    
+    query += """
+        GROUP BY r.nombre_sala, r.edificio, s.tipo_sala, r.id_turno, t.horario_inicio, t.horario_fin
+        ORDER BY r.nombre_sala, r.edificio, total_reservas DESC
+    """
+    
+    if limit:
+        try:
+            limit_int = int(limit)
+            query += f" LIMIT {limit_int}"
+        except ValueError:
+            return jsonify({'error': 'limit must be an integer'}), 400
+    
+    try:
+        results = execute_query(query, tuple(params) if params else None, role='readonly')
+        
+        # Agrupar resultados por sala
+        salas_dict = {}
+        for row in results:
+            sala_key = f"{row['nombre_sala']} - {row['edificio']}"
+            if sala_key not in salas_dict:
+                salas_dict[sala_key] = {
+                    'nombre_sala': row['nombre_sala'],
+                    'edificio': row['edificio'],
+                    'tipo_sala': row['tipo_sala'],
+                    'turnos': []
+                }
+            
+            salas_dict[sala_key]['turnos'].append({
+                'id_turno': row['id_turno'],
+                'horario_inicio': str(row['horario_inicio']),
+                'horario_fin': str(row['horario_fin']),
+                'total_reservas': row['total_reservas'],
+                'dias_diferentes': row['dias_diferentes']
+            })
+        
+        # Convertir a lista
+        salas_list = list(salas_dict.values())
+        
+        return jsonify({
+            'total_salas': len(salas_list),
+            'salas': salas_list
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+@reports_bp.route('/occupancy-by-room-type', methods=['GET'])
+@jwt_required
+def occupancy_by_room_type():
+    """
+    Consulta Adicional 2: Porcentaje de ocupación por tipo de sala
+    
+    Mide la eficiencia de uso por categoría de sala (libre, docente, posgrado).
+    Calcula el porcentaje de ocupación basado en:
+    - Total de reservas realizadas vs capacidad total disponible
+    - Considera turnos disponibles y capacidad de cada sala
+    
+    Query params opcionales:
+    - start_date: fecha inicio (YYYY-MM-DD)
+    - end_date: fecha fin (YYYY-MM-DD)
+    """
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    
+    # Query para contar reservas por tipo de sala
+    query_reservas = """
+        SELECT 
+            s.tipo_sala, COUNT(r.id_reserva) as total_reservas, COUNT(DISTINCT r.fecha) as dias_con_reservas,
+            COUNT(DISTINCT CONCAT(r.nombre_sala, '-', r.edificio)) as salas_usadas
+        FROM sala s
+        LEFT JOIN reserva r ON s.nombre_sala = r.nombre_sala AND s.edificio = r.edificio
+    """
+    
+    filters = []
+    params = []
+    
+    if start_date:
+        filters.append("r.fecha >= %s")
+        params.append(start_date)
+    
+    if end_date:
+        filters.append("r.fecha <= %s")
+        params.append(end_date)
+    
+    if filters:
+        query_reservas += " WHERE " + " AND ".join(filters)
+    
+    query_reservas += " GROUP BY s.tipo_sala"
+    
+    # Query para obtener capacidad total por tipo de sala
+    query_capacidad = """
+        SELECT 
+            tipo_sala,
+            COUNT(*) as total_salas,
+            SUM(capacidad) as capacidad_total
+        FROM sala
+        GROUP BY tipo_sala
+    """
+    
+    try:
+        reservas_results = execute_query(query_reservas, tuple(params) if params else None, role='readonly')
+        capacidad_results = execute_query(query_capacidad, role='readonly')
+        
+        # Crear diccionario de capacidades
+        capacidades = {row['tipo_sala']: row for row in capacidad_results}
+        
+        # Calcular estadísticas
+        tipos_sala = []
+        for row in reservas_results:
+            tipo = row['tipo_sala']
+            total_reservas = row['total_reservas'] or 0
+            
+            if tipo in capacidades:
+                cap_info = capacidades[tipo]
+                total_salas = cap_info['total_salas']
+                
+                # Estimación de slots disponibles (asumiendo ~5 turnos promedio por día)
+                dias = row['dias_con_reservas'] or 1
+                slots_disponibles = total_salas * dias * 5
+                
+                # Calcular porcentaje de ocupación
+                if slots_disponibles > 0:
+                    porcentaje_ocupacion = round((total_reservas / slots_disponibles) * 100, 2)
+                else:
+                    porcentaje_ocupacion = 0.0
+                
+                tipos_sala.append({
+                    'tipo_sala': tipo,
+                    'total_salas': total_salas,
+                    'capacidad_total': cap_info['capacidad_total'],
+                    'total_reservas': total_reservas,
+                    'dias_con_reservas': row['dias_con_reservas'],
+                    'salas_usadas': row['salas_usadas'],
+                    'porcentaje_ocupacion': porcentaje_ocupacion
+                })
+        
+        return jsonify({
+            'tipos_sala': tipos_sala,
+            'total_tipos': len(tipos_sala)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+@reports_bp.route('/repeat-offenders', methods=['GET'])
+@jwt_required
+def repeat_offenders():
+    """
+    Consulta Adicional 3: Participantes sancionados por reincidencia
+    
+    Lista participantes que han tenido más de una sanción,
+    ordenados por cantidad de sanciones (de mayor a menor).
+    Útil para identificar patrones de comportamiento problemático.
+    
+    Query params opcionales:
+    - min_sanctions: mínimo de sanciones para considerar reincidente (default: 2)
+    - only_active: 'true' para mostrar solo sanciones vigentes (default: false)
+    """
+    min_sanctions = request.args.get('min_sanctions', 2)
+    only_active = request.args.get('only_active', 'false').lower() in ('true', '1', 'yes')
+    
+    try:
+        min_sanctions = int(min_sanctions)
+    except ValueError:
+        return jsonify({'error': 'min_sanctions must be an integer'}), 400
+    
+    # Query base: obtener todas las sanciones agrupadas por participante
+    query = """
+        SELECT 
+            sp.ci_participante, p.nombre, p.apellido, p.email, COUNT(sp.fecha_inicio) as total_sanciones,
+            MIN(sp.fecha_inicio) as primera_sancion, MAX(sp.fecha_fin) as ultima_sancion
+        FROM sancion_participante sp
+        JOIN participante p ON sp.ci_participante = p.ci
+    """
+    
+    if only_active:
+        query += " WHERE sp.fecha_fin >= CURDATE()"
+    
+    query += """
+        GROUP BY sp.ci_participante, p.nombre, p.apellido, p.email
+        HAVING total_sanciones >= %s
+        ORDER BY total_sanciones DESC, ultima_sancion DESC
+    """
+    
+    try:
+        results = execute_query(query, (min_sanctions,), role='readonly')
+        
+        # Query adicional para contar sanciones activas por cada participante
+        query_activas = """
+            SELECT ci_participante, COUNT(*) as activas
+            FROM sancion_participante
+            WHERE fecha_fin >= CURDATE()
+            GROUP BY ci_participante
+        """
+        activas_results = execute_query(query_activas, role='readonly')
+        
+        # Crear diccionario de sanciones activas
+        activas_dict = {row['ci_participante']: row['activas'] for row in activas_results}
+        
+        # Construir respuesta
+        reincidentes = []
+        for row in results:
+            ci = row['ci_participante']
+            reincidentes.append({
+                'ci': ci,
+                'nombre_completo': f"{row['nombre']} {row['apellido']}",
+                'email': row['email'],
+                'total_sanciones': row['total_sanciones'],
+                'primera_sancion': str(row['primera_sancion']),
+                'ultima_sancion': str(row['ultima_sancion']),
+                'sanciones_activas': activas_dict.get(ci, 0)
+            })
+        
+        return jsonify({
+            'total_reincidentes': len(reincidentes),
+            'min_sanciones': min_sanctions,
+            'solo_activas': only_active,
+            'reincidentes': reincidentes
+        }), 200
+        
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
