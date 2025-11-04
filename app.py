@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 import os
+from flask_cors import CORS
 
 # Extensions
 from src.extensions import limiter
@@ -11,6 +12,14 @@ def create_app(config_object=None):
 
 	if config_object:
 		app.config.from_object(config_object)
+
+	# Habilitar CORS para que el frontend pueda conectarse
+	CORS(app, 
+		 resources={r"/*": {"origins": ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080", "*"]}},
+		 supports_credentials=True,
+		 allow_headers=["Content-Type", "Authorization"],
+		 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+	)
 
 	# Inicializar extensiones
 	limiter.init_app(app)

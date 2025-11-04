@@ -56,13 +56,13 @@ def authenticate_user(correo: str, plain_password: str):
 		return False, "Credenciales incorrectas"
 	
 	# Determinar si es admin o participante
-	cur.execute("SELECT id_admin FROM admin WHERE correo = %s", (correo,))
+	cur.execute("SELECT ci FROM admin WHERE email = %s", (correo,))
 	admin_row = cur.fetchone()
 	
 	if admin_row:
 		# Es admin
 		user_type = 'admin'
-		user_id = admin_row.get('id_admin') if isinstance(admin_row, dict) else admin_row[0]
+		user_id = admin_row.get('ci') if isinstance(admin_row, dict) else admin_row[0]
 	else:
 		# Es participante
 		cur.execute("SELECT ci FROM participante WHERE email = %s", (correo,))
