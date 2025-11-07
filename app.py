@@ -14,11 +14,13 @@ def create_app(config_object=None):
 		app.config.from_object(config_object)
 
 	# Habilitar CORS para que el frontend pueda conectarse
-	CORS(app, 
-		 resources={r"/*": {"origins": ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080", "*"]}},
-		 supports_credentials=True,
-		 allow_headers=["Content-Type", "Authorization"],
-		 methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+	# Habilitar CORS únicamente para orígenes explícitos. No usar '*' cuando se envían credenciales.
+	CORS(
+		app,
+		resources={r"/*": {"origins": ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"]}},
+		supports_credentials=True,
+		allow_headers=["Content-Type", "Authorization"],
+		methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 	)
 
 	# Inicializar extensiones
@@ -46,6 +48,10 @@ def create_app(config_object=None):
 	# Registrar rutas de auth (register/login)
 	from src.routes.auth_routes import auth_bp
 	app.register_blueprint(auth_bp, url_prefix='/api/auth')
+
+	# Registrar rutas de turnos
+	from src.routes.turno_routes import turno_bp
+	app.register_blueprint(turno_bp, url_prefix='/turnos')
 
 	# Registrar rutas de reportes (métricas BI)
 	from src.routes.reports_routes import reports_bp

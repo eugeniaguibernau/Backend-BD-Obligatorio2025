@@ -54,6 +54,10 @@ def jwt_required(fn):
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        # Allow preflight OPTIONS requests to pass through without JWT validation
+        if request.method == 'OPTIONS':
+            return ('', 200)
+
         auth = request.headers.get('Authorization', '')
         if not auth or not auth.startswith('Bearer '):
             return jsonify({'ok': False, 'mensaje': 'Authorization header missing or malformed'}), 401

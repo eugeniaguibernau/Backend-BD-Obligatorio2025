@@ -19,15 +19,36 @@ reserva_bp = Blueprint('reserva_bp', __name__)
 @reserva_bp.route('/', methods=['POST'])
 def crear_reserva_ruta():
     datos = request.get_json() or {}
-    campos_requeridos = ['nombre_sala', 'edificio', 'fecha', 'id_turno', 'participantes']
+    # Aceptamos que el cliente envíe 'id_turno' (número) o el par 'hora_inicio'/'hora_fin' (ej. "08:00","10:00")
+    campos_requeridos = ['nombre_sala', 'edificio', 'fecha', 'participantes']
     for campo in campos_requeridos:
         if campo not in datos:
             return jsonify({'error': f'Falta el campo obligatorio: {campo}'}), 400
+
+    # Debe suministrarse o bien id_turno o bien hora_inicio (y opcionalmente hora_fin)
+    if 'id_turno' not in datos and 'hora_inicio' not in datos:
+        return jsonify({'error': 'Falta el identificador de turno: envía id_turno o hora_inicio'}), 400
 
     try:
         fecha_reserva = datetime.strptime(datos['fecha'], '%Y-%m-%d').date()
         if fecha_reserva < datetime.now().date():
             return jsonify({'error': 'No se puede reservar para una fecha pasada.'}), 400
+
+        # Si el cliente envió hora_inicio en lugar de id_turno, convertirla a id_turno buscando en la tabla turno
+        if 'id_turno' not in datos and 'hora_inicio' in datos:
+            hora_inicio = datos.get('hora_inicio')
+            hora_fin = datos.get('hora_fin')
+            # Buscar un turno con esas horas (comparando TIME)
+            query = "SELECT id_turno FROM turno WHERE TIME(hora_inicio) = %s "
+            params = [hora_inicio]
+            if hora_fin:
+                query += "AND TIME(hora_fin) = %s"
+                params.append(hora_fin)
+            query += " LIMIT 1"
+            resultado = execute_query(query, tuple(params), role='readonly')
+            if not resultado:
+                return jsonify({'error': 'Turno no encontrado para el horario proporcionado.'}), 400
+            datos['id_turno'] = resultado[0]['id_turno']
 
         valido, mensaje = validar_reglas_negocio(datos)
         if not valido:
