@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import os
 from flask_cors import CORS
 
@@ -9,6 +9,10 @@ from src.auth.jwt_utils import JWT_SECRET
 
 def create_app(config_object=None):
 	app = Flask(__name__)
+
+	# Aceptar rutas con o sin slash final para evitar redirecciones que rompen
+	# las peticiones CORS preflight en algunos navegadores.
+	app.url_map.strict_slashes = False
 
 	if config_object:
 		app.config.from_object(config_object)
@@ -60,6 +64,19 @@ def create_app(config_object=None):
 	@app.route('/health')
 	def health():
 		return jsonify({'status': 'ok'}), 200
+
+	# Fallback seguro: asegurar que las respuestas incluyen los headers CORS
+	# necesarios en caso de que Flask-CORS no los agregue por alguna razón.
+	@app.after_request
+	def _add_cors_headers(response):
+		allowed_origins = ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"]
+		origin = request.headers.get('Origin')
+		if origin and origin in allowed_origins:
+			response.headers['Access-Control-Allow-Origin'] = origin
+			response.headers['Access-Control-Allow-Credentials'] = 'true'
+			response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+			response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+		return response
 
 	return app
 
