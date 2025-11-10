@@ -56,7 +56,10 @@ def jwt_required(fn):
     def wrapper(*args, **kwargs):
         # Allow preflight OPTIONS requests to pass through without JWT validation
         if request.method == 'OPTIONS':
-            return ('', 200)
+            # Devuelve la respuesta OPTIONS por defecto de Flask para que
+            # la extensión Flask-CORS pueda añadir los headers CORS correctamente.
+            from flask import current_app
+            return current_app.make_default_options_response()
 
         auth = request.headers.get('Authorization', '')
         if not auth or not auth.startswith('Bearer '):
