@@ -200,7 +200,7 @@ def actualizar_reserva_ruta(id_reserva: int):
 
         if debe_aplicar_sancion:
             try:
-                resultado = aplicar_sanciones_por_reserva(id_reserva, sancion_dias=7)
+                resultado = aplicar_sanciones_por_reserva(id_reserva, sancion_dias=60)
                 respuesta['sanciones'] = {
                     'aplicadas': resultado.get('insertadas', 0),
                     'sancionados': resultado.get('sancionados', []),

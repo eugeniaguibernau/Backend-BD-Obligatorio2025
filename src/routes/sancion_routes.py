@@ -6,6 +6,8 @@ from src.models.sancion_model import (
     listar_sanciones,
     eliminar_sancion,
     aplicar_sanciones_por_reserva,
+    procesar_reservas_vencidas,
+    extender_sanciones_existentes,
 )
 from src.utils.response import with_auth_link
 from src.auth.jwt_utils import jwt_required
@@ -63,6 +65,20 @@ def crear_sancion_ruta():
         return jsonify({"error": "Error interno", "detalle": str(e)}), 500
 
 
+@sancion_bp.route('/extender', methods=['POST'])
+@jwt_required
+@require_admin
+def extender_sanciones_ruta():
+    """Endpoint admin para extender sanciones existentes a un mínimo de días."""
+    body = request.get_json(silent=True) or {}
+    min_dias = int(body.get('min_dias', 60))
+    try:
+        resultado = extender_sanciones_existentes(min_dias=min_dias)
+        return jsonify({'resultado': resultado}), 200
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
 @sancion_bp.route("/", methods=["DELETE"])
 @jwt_required
 @require_admin
@@ -95,14 +111,28 @@ def eliminar_sancion_ruta():
 def aplicar_por_reserva_ruta(id_reserva: int):
     """
     Aplica la regla: sancionar a todos SOLO si nadie asistió.
-    Opcional: body {"sancion_dias": 7} (default=7)
+    Opcional: body {"sancion_dias": 60} (default=60)
     """
     body = request.get_json(silent=True) or {}
-    sancion_dias = int(body.get("sancion_dias", 7))
+    sancion_dias = int(body.get("sancion_dias", 60))
     try:
         resultado = aplicar_sanciones_por_reserva(id_reserva, sancion_dias=sancion_dias)
         return jsonify({"resultado": resultado}), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": "Error interno", "detalle": str(e)}), 500
+
+
+@sancion_bp.route("/procesar-vencidas", methods=["POST"])
+@jwt_required
+@require_admin
+def procesar_vencidas_ruta():
+    """Endpoint para disparar el procesamiento de reservas vencidas que genera sanciones automáticamente."""
+    body = request.get_json(silent=True) or {}
+    sancion_dias = int(body.get("sancion_dias", 60))
+    try:
+        resumen = procesar_reservas_vencidas(sancion_dias=sancion_dias)
+        return jsonify({"resultado": resumen}), 200
     except Exception as e:
         return jsonify({"error": "Error interno", "detalle": str(e)}), 500
