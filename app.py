@@ -21,7 +21,7 @@ def create_app(config_object=None):
 	# Habilitar CORS únicamente para orígenes explícitos. No usar '*' cuando se envían credenciales.
 	CORS(
 		app,
-		resources={r"/*": {"origins": ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"]}},
+		resources={r"/*": {"origins": ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:8080"]}},
 		supports_credentials=True,
 		allow_headers=["Content-Type", "Authorization"],
 		methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -69,7 +69,7 @@ def create_app(config_object=None):
 	# necesarios en caso de que Flask-CORS no los agregue por alguna razón.
 	@app.after_request
 	def _add_cors_headers(response):
-		allowed_origins = ["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"]
+		allowed_origins = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:8080"]
 		origin = request.headers.get('Origin')
 		if origin and origin in allowed_origins:
 			response.headers['Access-Control-Allow-Origin'] = origin

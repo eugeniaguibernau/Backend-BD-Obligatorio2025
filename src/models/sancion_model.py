@@ -42,7 +42,15 @@ def listar_sanciones(ci_participante: int | None = None, solo_activas: bool = Fa
     if solo_activas:
         where.append("fecha_fin >= CURDATE()")
 
-    sql = "SELECT ci_participante, fecha_inicio, fecha_fin FROM sancion_participante"
+    # Devolvemos también campos calculados para que el frontend muestre valores consistentes:
+    # - duracion_dias: número entero de días entre fecha_inicio y fecha_fin
+    # - dias_restantes: número entero de días desde hoy hasta fecha_fin (puede ser negativo si ya venció)
+    sql = (
+        "SELECT ci_participante, fecha_inicio, fecha_fin, "
+        "DATEDIFF(fecha_fin, fecha_inicio) AS duracion_dias, "
+        "DATEDIFF(fecha_fin, CURDATE()) AS dias_restantes "
+        "FROM sancion_participante"
+    )
     if where:
         sql += " WHERE " + " AND ".join(where)
 
@@ -72,7 +80,7 @@ def eliminar_sancion(ci_participante: int, fecha_inicio, fecha_fin):
     conexion.close()
     return filas
 
-def aplicar_sanciones_por_reserva(id_reserva: int, sancion_dias: int = 7):
+def aplicar_sanciones_por_reserva(id_reserva: int, sancion_dias: int = 60):
     """
     Regla pedida: SOLO hay sanción si NADIE asistió a la reserva.
     - Si al menos un participante marcó asistencia=1, NO se sanciona a nadie.
@@ -141,3 +149,80 @@ def aplicar_sanciones_por_reserva(id_reserva: int, sancion_dias: int = 7):
         "fecha_fin": fecha_fin,
         "motivo": "Nadie asistió a la reserva."
     }
+
+
+def procesar_reservas_vencidas(sancion_dias: int = 60):
+    """
+    Busca reservas con fecha anterior a la actual y estado 'activa'.
+    Para cada reserva:
+      - si hubo al menos 1 asistencia -> marca 'finalizada'
+      - si nadie asistió -> crea sanciones para todos y marca 'sin asistencia'
+
+    Retorna un resumen con listas de procesadas, finalizadas y sancionadas.
+    """
+    conexion = get_connection(role='user')
+    cursor = conexion.cursor()
+
+    # obtener reservas vencidas y aún activas
+    cursor.execute("SELECT id_reserva, fecha FROM reserva WHERE fecha < CURDATE() AND estado = 'activa'")
+    filas = cursor.fetchall()
+
+    resumen = {
+        'procesadas': 0,
+        'finalizadas': [],
+        'sancionadas': [],
+        'insertadas_total': 0
+    }
+
+    for fila in filas:
+        id_reserva = fila['id_reserva']
+        fecha_reserva = _to_date(fila['fecha'])
+
+        # contar asistentes
+        cursor.execute("SELECT COUNT(*) AS asistieron FROM reserva_participante WHERE id_reserva = %s AND asistencia = 1", (id_reserva,))
+        asistieron = cursor.fetchone().get('asistieron', 0) or 0
+
+        if asistieron > 0:
+            # marcar como finalizada
+            cursor.execute("UPDATE reserva SET estado = 'finalizada' WHERE id_reserva = %s", (id_reserva,))
+            resumen['finalizadas'].append(id_reserva)
+        else:
+            # aplicar sanciones (usa la función existente que inserta sanciones)
+            resultado = aplicar_sanciones_por_reserva(id_reserva, sancion_dias=sancion_dias)
+            # marcar como sin asistencia
+            cursor.execute("UPDATE reserva SET estado = 'sin asistencia' WHERE id_reserva = %s", (id_reserva,))
+            resumen['sancionadas'].append({'id_reserva': id_reserva, 'detalle': resultado})
+            resumen['insertadas_total'] += resultado.get('insertadas', 0)
+
+        resumen['procesadas'] += 1
+
+    conexion.commit()
+    cursor.close()
+    conexion.close()
+    return resumen
+
+
+def extender_sanciones_existentes(min_dias: int = 60):
+    """
+    Actualiza sanciones existentes cuya duración sea menor a `min_dias`.
+
+    - Calcula fecha_fin deseada = fecha_inicio + min_dias
+    - Actualiza solo las filas donde fecha_fin < fecha_inicio + min_dias
+    Retorna dict con filas_actualizadas.
+    """
+    conexion = get_connection(role='admin')
+    cursor = conexion.cursor()
+
+    # MySQL: actualizar aquellas sanciones cuya fecha_fin sea anterior a fecha_inicio + INTERVAL min_dias DAY
+    cursor.execute(f"""
+        UPDATE sancion_participante
+        SET fecha_fin = DATE_ADD(fecha_inicio, INTERVAL %s DAY)
+        WHERE fecha_fin < DATE_ADD(fecha_inicio, INTERVAL %s DAY)
+    """, (min_dias, min_dias))
+
+    filas_actualizadas = cursor.rowcount
+    conexion.commit()
+    cursor.close()
+    conexion.close()
+
+    return {"filas_actualizadas": filas_actualizadas, "min_dias": min_dias}

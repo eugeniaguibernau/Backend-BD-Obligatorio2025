@@ -16,8 +16,7 @@ auth_bp = Blueprint('auth', __name__)
 def register():
     data = request.get_json() or {}
     correo = data.get('correo')
-    # Accept both 'contraseña' and 'contrasena' keys to be tolerant with clients
-    plain = data.get('contraseña') or data.get('contrasena') or data.get('password')
+    plain = data.get('contraseña')
     participante = data.get('participante') or {}
 
     if not correo or not plain:
@@ -101,8 +100,7 @@ def register():
 def login():
     data = request.get_json() or {}
     correo = data.get('correo')
-    # Accept alternate key spellings for password from various clients
-    plain = data.get('contraseña') or data.get('contrasena') or data.get('password')
+    plain = data.get('contraseña')
 
     if not correo or not plain:
         return jsonify({"ok": False, "mensaje": "correo y contraseña requeridos"}), 400
