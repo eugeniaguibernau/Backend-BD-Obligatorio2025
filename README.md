@@ -119,6 +119,30 @@ curl http://localhost:5000/api/reports/most-reserved-rooms
 
 Si ves una respuesta JSON, ¡la aplicación está funcionando correctamente! 🎉
 
+#### 📌 Sobre el Cronjob de Sanciones Automáticas
+
+**¿Necesitas configurar algo adicional?** ❌ **NO**
+
+El sistema incluye un **cronjob automático** que procesa sanciones diariamente. Esto ya está configurado en el Dockerfile y **se activa automáticamente** cuando levantas los contenedores con `docker-compose up`.
+
+**¿Qué hace el cronjob?**
+- Se ejecuta todos los días a las **8:00 AM**
+- Busca reservas del día anterior que no tuvieron asistencia
+- Aplica automáticamente sanciones de 60 días a los participantes que no asistieron
+- Registra toda la actividad en logs
+
+**Verificar que funciona:**
+
+```bash
+# Ver logs del procesamiento de sanciones
+docker exec flask_app cat /var/log/sanciones.log
+
+# Ejecutar manualmente para pruebas (procesa reservas de ayer)
+docker exec flask_app python3 /app/scripts/procesar_sanciones_diarias.py
+```
+
+**Nota:** El cronjob usa la hora del contenedor Docker. Si necesitas ajustar el horario, edita el archivo `Dockerfile` y reconstruye la imagen.
+
 #### Paso 7: Ver logs (opcional)
 
 ```bash
@@ -507,6 +531,53 @@ curl -X POST http://localhost:5000/api/reservas \
 ```
 
 ## 🛠️ Scripts Administrativos
+
+### Procesar sanciones diariamente (Cronjob Automático)
+
+El sistema incluye un **cronjob automático** que se ejecuta todos los días a las **8:00 AM** dentro del contenedor Docker. Este script busca reservas del día anterior sin asistencia y aplica sanciones automáticamente.
+
+**Ejecución manual (para pruebas):**
+
+```bash
+# Dentro del contenedor Docker (recomendado)
+docker exec flask_app python3 /app/scripts/procesar_sanciones_diarias.py
+
+# Sin Docker (si estás corriendo localmente)
+python scripts/procesar_sanciones_diarias.py
+```
+
+**Ver logs de ejecuciones automáticas:**
+
+```bash
+# Ver todas las ejecuciones del cronjob
+docker exec flask_app cat /var/log/sanciones.log
+
+# Ver últimas 20 líneas
+docker exec flask_app tail -20 /var/log/sanciones.log
+```
+
+**¿Qué hace este script?**
+- Busca reservas activas del día anterior (ayer)
+- Verifica si hubo asistencia registrada
+- Si nadie asistió → aplica sanción de 60 días a todos los participantes
+- Si alguien asistió → no aplica sanciones
+- Registra resultados en `/var/log/sanciones.log`
+
+**Cambiar horario del cronjob:**
+
+Si necesitas cambiar la hora de ejecución (por defecto 8:00 AM), edita el `Dockerfile` línea ~26:
+
+```dockerfile
+# Cambiar de "0 8" (8:00 AM) a "0 14" (2:00 PM), por ejemplo
+RUN echo "0 14 * * * cd /app && /usr/local/bin/python3 /app/scripts/procesar_sanciones_diarias.py >> /var/log/sanciones.log 2>&1" > /etc/cron.d/sanciones-cron
+```
+
+Luego reconstruir la imagen:
+
+```bash
+docker-compose down
+docker-compose up -d --build
+```
 
 ### Migrar contraseñas a bcrypt
 

@@ -70,7 +70,9 @@ def validar_reglas_negocio(datos):
         cursor.execute("""
             SELECT COUNT(*) AS cantidad
             FROM sancion_participante
-            WHERE ci_participante = %s AND fecha_fin >= CURDATE()
+            WHERE ci_participante = %s 
+            AND fecha_inicio <= CURDATE() 
+            AND fecha_fin >= CURDATE()
         """, (ci,))
         sanciones = cursor.fetchone()['cantidad']
         if sanciones and sanciones > 0:
@@ -94,16 +96,24 @@ def validar_reglas_negocio(datos):
 
     # Reglas globales para participantes: máximo 2 horas/día y 3 reservas activas/semana
     for ci in participantes:
+        # Validar máximo 2 horas por día (sumando la duración de todas las reservas)
         cursor.execute("""
-            SELECT COUNT(*) AS cantidad
+            SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, t.hora_inicio, t.hora_fin)), 0) AS horas_reservadas
             FROM reserva_participante rp
             JOIN reserva r ON rp.id_reserva = r.id_reserva
-            WHERE rp.ci_participante = %s AND r.fecha = %s AND r.estado = 'activa'
+            JOIN turno t ON r.id_turno = t.id_turno
+            WHERE rp.ci_participante = %s 
+            AND r.fecha = %s 
+            AND r.estado = 'activa'
         """, (ci, fecha))
-        horas = cursor.fetchone()['cantidad']
-        if horas >= 2:
-            return False, f"El participante {ci} ya tiene 2 horas reservadas ese día."
+        horas_reservadas = cursor.fetchone()['horas_reservadas'] or 0
+        
+        # Como cada turno es de 1 hora, también podemos validar así:
+        # Pero la query anterior es más robusta y funciona aunque cambien los turnos
+        if horas_reservadas >= 2:
+            return False, f"El participante {ci} ya tiene {horas_reservadas} horas reservadas ese día. Máximo permitido: 2 horas."
 
+        # Validar máximo 3 reservas activas por semana
         fecha_base = datetime.strptime(fecha, '%Y-%m-%d').date()
         inicio_semana = fecha_base - timedelta(days=fecha_base.weekday())
         fin_semana = inicio_semana + timedelta(days=6)
@@ -117,7 +127,7 @@ def validar_reglas_negocio(datos):
         """, (ci, inicio_semana, fin_semana))
         activas = cursor.fetchone()['cantidad']
         if activas >= 3:
-            return False, f"El participante {ci} ya tiene 3 reservas activas esta semana."
+            return False, f"El participante {ci} ya tiene {activas} reservas activas esta semana. Máximo permitido: 3 reservas."
 
     cursor.close()
     conexion.close()
@@ -147,34 +157,109 @@ def crear_reserva(nombre_sala, edificio, fecha, id_turno, participantes):
 def listar_reservas(ci_participante=None, nombre_sala=None):
     conexion = get_connection(role='readonly')
     cursor = conexion.cursor()
-    consulta = "SELECT * FROM reserva"
+    
+    # Consulta base con JOIN a turno para obtener horarios
+    consulta = """
+        SELECT 
+            r.id_reserva,
+            r.nombre_sala,
+            r.edificio,
+            r.fecha,
+            r.estado,
+            t.hora_inicio,
+            t.hora_fin
+        FROM reserva r
+        LEFT JOIN turno t ON r.id_turno = t.id_turno
+    """
+    
     parametros = []
     filtros = []
 
     if ci_participante:
-        filtros.append("id_reserva IN (SELECT id_reserva FROM reserva_participante WHERE ci_participante = %s)")
+        filtros.append("r.id_reserva IN (SELECT id_reserva FROM reserva_participante WHERE ci_participante = %s)")
         parametros.append(ci_participante)
     if nombre_sala:
-        filtros.append("nombre_sala = %s")
+        filtros.append("r.nombre_sala = %s")
         parametros.append(nombre_sala)
     if filtros:
         consulta += " WHERE " + " AND ".join(filtros)
+    
+    consulta += " ORDER BY r.fecha DESC, t.hora_inicio ASC"
 
     cursor.execute(consulta, parametros)
     filas = cursor.fetchall()
     cursor.close()
     conexion.close()
-    return filas
+    
+    # Agrupar por id_reserva para combinar múltiples turnos
+    reservas_dict = {}
+    for fila in filas:
+        id_reserva = fila['id_reserva']
+        if id_reserva not in reservas_dict:
+            # Crear objeto turno singular con el primer turno encontrado
+            turno = None
+            if fila['hora_inicio'] and fila['hora_fin']:
+                turno = {
+                    'hora_inicio': str(fila['hora_inicio']).split(' ')[-1] if fila['hora_inicio'] else None,
+                    'hora_fin': str(fila['hora_fin']).split(' ')[-1] if fila['hora_fin'] else None
+                }
+            
+            reservas_dict[id_reserva] = {
+                'id_reserva': id_reserva,
+                'nombre_sala': fila['nombre_sala'],
+                'edificio': fila['edificio'],
+                'fecha': fila['fecha'].strftime('%Y-%m-%d') if fila['fecha'] else None,
+                'estado': fila['estado'],
+                'turno': turno  # Objeto singular en lugar de array
+            }
+    
+    return list(reservas_dict.values())
 
 
 def obtener_reserva(id_reserva):
     conexion = get_connection(role='readonly')
     cursor = conexion.cursor()
-    cursor.execute("SELECT * FROM reserva WHERE id_reserva = %s", (id_reserva,))
+    
+    # Obtener datos de la reserva con información del turno
+    cursor.execute("""
+        SELECT 
+            r.id_reserva,
+            r.nombre_sala,
+            r.edificio,
+            r.fecha,
+            r.estado,
+            t.hora_inicio,
+            t.hora_fin
+        FROM reserva r
+        LEFT JOIN turno t ON r.id_turno = t.id_turno
+        WHERE r.id_reserva = %s
+    """, (id_reserva,))
     fila = cursor.fetchone()
     cursor.close()
     conexion.close()
-    return fila
+    
+    if not fila:
+        return None
+    
+    # Crear objeto turno singular
+    turno = None
+    if fila['hora_inicio'] and fila['hora_fin']:
+        turno = {
+            'hora_inicio': str(fila['hora_inicio']).split(' ')[-1] if fila['hora_inicio'] else None,
+            'hora_fin': str(fila['hora_fin']).split(' ')[-1] if fila['hora_fin'] else None
+        }
+    
+    # Formatear la respuesta con turno singular
+    reserva = {
+        'id_reserva': fila['id_reserva'],
+        'nombre_sala': fila['nombre_sala'],
+        'edificio': fila['edificio'],
+        'fecha': fila['fecha'].strftime('%Y-%m-%d') if fila['fecha'] else None,
+        'estado': fila['estado'],
+        'turno': turno  # Objeto singular en lugar de array
+    }
+    
+    return reserva
 
 
 def actualizar_reserva(id_reserva, datos):

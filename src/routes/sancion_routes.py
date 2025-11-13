@@ -28,6 +28,7 @@ def _parse_date(s: str):
 def listar_sanciones_ruta():
     """
     GET /sanciones?ci=123&activas=true
+    Devuelve las sanciones y un resumen con totales
     """
     ci = request.args.get("ci", type=int)
     activas = request.args.get("activas", default="false").lower() in ("1", "true", "t", "yes", "y")
@@ -37,7 +38,35 @@ def listar_sanciones_ruta():
             ci = g.user_id  # Forzar filtro por CI del participante logueado
         
         data = listar_sanciones(ci_participante=ci, solo_activas=activas)
-        return jsonify(with_auth_link({"sanciones": data})), 200
+        
+        # Calcular resumen
+        total_sanciones = len(data)
+        total_dias_sancionados = sum(s.get('duracion_dias', 0) for s in data)
+        
+        # Para dias_restantes_total: encontrar la fecha_fin más lejana de sanciones vigentes
+        from datetime import date
+        hoy = date.today()
+        sanciones_vigentes = [s for s in data if s.get('dias_restantes', 0) >= 0]
+        
+        if sanciones_vigentes:
+            # Encontrar la fecha de fin más lejana
+            fecha_fin_max = max(s.get('fecha_fin') for s in sanciones_vigentes if s.get('fecha_fin'))
+            # Calcular días desde hoy hasta esa fecha
+            if fecha_fin_max:
+                dias_restantes_total = (fecha_fin_max - hoy).days
+            else:
+                dias_restantes_total = 0
+        else:
+            dias_restantes_total = 0
+        
+        return jsonify(with_auth_link({
+            "sanciones": data,
+            "resumen": {
+                "total_sanciones": total_sanciones,
+                "total_dias_sancionados": total_dias_sancionados,
+                "dias_restantes_total": dias_restantes_total
+            }
+        })), 200
     except Exception as e:
         return jsonify({"error": "Error interno", "detalle": str(e)}), 500
 

@@ -47,10 +47,16 @@ def authenticate_user(correo: str, plain_password: str):
 	if not row:
 		cur.close()
 		conn.close()
+		print(f"[DEBUG] Usuario no encontrado: {correo}")
 		return False, "Usuario no encontrado"
 
 	hashed = row.get('contraseña') if isinstance(row, dict) else row[1]
-	if not verify_password(plain_password, hashed):
+	print(f"[DEBUG] Email: {correo}")
+	print(f"[DEBUG] Hash from DB: {hashed[:20] if hashed else 'NULL'}...")
+	print(f"[DEBUG] Plain password: {plain_password}")
+	verify_result = verify_password(plain_password, hashed)
+	print(f"[DEBUG] Password verify result: {verify_result}")
+	if not verify_result:
 		cur.close()
 		conn.close()
 		return False, "Credenciales incorrectas"

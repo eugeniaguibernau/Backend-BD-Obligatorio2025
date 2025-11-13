@@ -69,7 +69,7 @@ def _compute_estado_actual(reserva):
 @reserva_bp.route('/', methods=['POST'])
 def crear_reserva_ruta():
     datos = request.get_json() or {}
-    # Aceptamos que el cliente envíe 'id_turno' (número) o el par 'hora_inicio'/'hora_fin' (ej. "08:00","10:00")
+    # Aceptamos que el cliente envíe 'turnos' (array) o 'id_turno' (número único) para retrocompatibilidad
     campos_requeridos = ['nombre_sala', 'edificio', 'fecha', 'participantes']
     for campo in campos_requeridos:
         if campo not in datos:
@@ -79,75 +79,129 @@ def crear_reserva_ruta():
     if not isinstance(datos.get('participantes'), list) or len(datos.get('participantes')) == 0:
         return jsonify({'error': 'participantes debe ser una lista no vacía con los CI de los participantes'}), 400
 
-    # Debe suministrarse o bien id_turno o bien hora_inicio (y opcionalmente hora_fin)
-    if 'id_turno' not in datos and 'hora_inicio' not in datos:
-        return jsonify({'error': 'Falta el identificador de turno: envía id_turno o hora_inicio'}), 400
+    # Debe suministrarse 'turnos' (array), 'id_turno' (número) o 'hora_inicio'
+    if 'turnos' not in datos and 'id_turno' not in datos and 'hora_inicio' not in datos:
+        return jsonify({'error': 'Falta el identificador de turno: envía turnos (array), id_turno o hora_inicio'}), 400
 
     try:
+        print(f"[DEBUG] Fecha recibida: {datos.get('fecha')}")
+        print(f"[DEBUG] Fecha actual del servidor: {datetime.now().date()}")
         fecha_reserva = datetime.strptime(datos['fecha'], '%Y-%m-%d').date()
+        print(f"[DEBUG] Fecha parseada: {fecha_reserva}")
         if fecha_reserva < datetime.now().date():
+            print(f"[DEBUG] Fecha es pasada! {fecha_reserva} < {datetime.now().date()}")
             return jsonify({'error': 'No se puede reservar para una fecha pasada.'}), 400
 
-        # Si el cliente envió hora_inicio en lugar de id_turno, convertirla a id_turno buscando en la tabla turno
-        if 'id_turno' not in datos and 'hora_inicio' in datos:
-            hora_inicio = datos.get('hora_inicio')
-            hora_fin = datos.get('hora_fin')
-            # normalizar formato HH:MM -> HH:MM:00 para comparar con TIME() en SQL
-            if isinstance(hora_inicio, str) and len(hora_inicio.split(':')) == 2:
-                hora_inicio = hora_inicio + ':00'
-            if hora_fin and isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
-                hora_fin = hora_fin + ':00'
-            # exigir que hora_inicio esté alineada en minuto 00 (bloque de hora)
-            try:
-                parts = hora_inicio.split(':')
-                hi_h = int(parts[0])
-                hi_m = int(parts[1]) if len(parts) > 1 else 0
-                if hi_m != 0:
-                    return jsonify({'error': 'Los turnos deben empezar en minuto 00 (ej: 08:00, 09:00)'}), 400
-            except Exception:
-                return jsonify({'error': 'Formato de hora inválido. Use HH:MM o HH:MM:SS'}), 400
-            # si se envía hora_fin, exigir que sea exactamente una hora después (bloque de 1 hora)
-            if hora_fin:
-                try:
-                    # coger solo horas y minutos (ignorar segundos si existen)
-                    hi_parts = hora_inicio.split(':')[:2]
-                    hf_parts = hora_fin.split(':')[:2]
-                    hi_h, hi_m = map(int, hi_parts)
-                    hf_h, hf_m = map(int, hf_parts)
-                    # construir simple diferencia en horas
-                    if hf_m != 0 or (hf_h - hi_h) not in (1, -23):
-                        return jsonify({'error': 'Los turnos deben ser de 1 hora. Si quiere varias horas cree reservas separadas.'}), 400
-                except Exception:
-                    return jsonify({'error': 'Formato de hora inválido. Use HH:MM o HH:MM:SS'}), 400
-            # Buscar un turno con esas horas (comparando TIME)
-            query = "SELECT id_turno FROM turno WHERE TIME(hora_inicio) = %s "
-            params = [hora_inicio]
-            if hora_fin:
-                query += "AND TIME(hora_fin) = %s"
-                params.append(hora_fin)
-            query += " LIMIT 1"
-            resultado = execute_query(query, tuple(params), role='readonly')
-            if not resultado:
-                return jsonify({'error': 'Turno no encontrado para el horario proporcionado.'}), 400
-            datos['id_turno'] = resultado[0]['id_turno']
+        # Normalizar entrada: convertir a lista de id_turno
+        turnos_a_reservar = []
+        
+        # Caso 1: Array de turnos (nuevo formato)
+        if 'turnos' in datos:
+            if not isinstance(datos['turnos'], list) or len(datos['turnos']) == 0:
+                return jsonify({'error': 'turnos debe ser una lista no vacía'}), 400
+            
+            for turno_item in datos['turnos']:
+                # Puede ser un número (id_turno) o un objeto con hora_inicio/hora_fin
+                if isinstance(turno_item, (int, float)):
+                    turnos_a_reservar.append(int(turno_item))
+                elif isinstance(turno_item, dict):
+                    # Convertir hora_inicio/hora_fin a id_turno
+                    id_turno_convertido = _convertir_hora_a_id_turno(turno_item)
+                    if id_turno_convertido:
+                        turnos_a_reservar.append(id_turno_convertido)
+                    else:
+                        return jsonify({'error': f'No se encontró turno para {turno_item}'}), 400
+                else:
+                    return jsonify({'error': 'Formato de turno inválido en array turnos'}), 400
+        
+        # Caso 2: id_turno único (retrocompatibilidad)
+        elif 'id_turno' in datos:
+            turnos_a_reservar.append(int(datos['id_turno']))
+        
+        # Caso 3: hora_inicio/hora_fin (retrocompatibilidad)
+        elif 'hora_inicio' in datos:
+            id_turno_convertido = _convertir_hora_a_id_turno(datos)
+            if id_turno_convertido:
+                turnos_a_reservar.append(id_turno_convertido)
+            else:
+                return jsonify({'error': 'Turno no encontrado para el horario proporcionado'}), 400
 
-        valido, mensaje = validar_reglas_negocio(datos)
-        if not valido:
-            return jsonify({'error': mensaje}), 400
+        if not turnos_a_reservar:
+            return jsonify({'error': 'No se especificaron turnos válidos'}), 400
 
-        id_generado = crear_reserva(
-            datos['nombre_sala'],
-            datos['edificio'],
-            datos['fecha'],
-            datos['id_turno'],
-            datos['participantes']
-        )
-        return jsonify({'reserva_creada': id_generado}), 201
+        # Validar todas las reservas ANTES de crear cualquiera
+        for id_turno in turnos_a_reservar:
+            datos_validacion = {
+                'nombre_sala': datos['nombre_sala'],
+                'edificio': datos['edificio'],
+                'fecha': datos['fecha'],
+                'id_turno': id_turno,
+                'participantes': datos['participantes']
+            }
+            valido, mensaje = validar_reglas_negocio(datos_validacion)
+            if not valido:
+                return jsonify({'error': f'Turno {id_turno}: {mensaje}'}), 400
+
+        # Todas las validaciones pasaron, ahora crear las reservas
+        reservas_creadas = []
+        for id_turno in turnos_a_reservar:
+            id_generado = crear_reserva(
+                datos['nombre_sala'],
+                datos['edificio'],
+                datos['fecha'],
+                id_turno,
+                datos['participantes']
+            )
+            reservas_creadas.append({
+                'id_reserva': id_generado,
+                'id_turno': id_turno
+            })
+
+        # Respuesta
+        if len(reservas_creadas) == 1:
+            # Retrocompatibilidad: si es una sola reserva, devolver como antes
+            return jsonify({'reserva_creada': reservas_creadas[0]['id_reserva']}), 201
+        else:
+            # Múltiples reservas
+            return jsonify({
+                'ok': True,
+                'reservas_creadas': reservas_creadas,
+                'total': len(reservas_creadas)
+            }), 201
 
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
+def _convertir_hora_a_id_turno(datos):
+    """Helper para convertir hora_inicio/hora_fin a id_turno"""
+    hora_inicio = datos.get('hora_inicio')
+    hora_fin = datos.get('hora_fin')
+    
+    if not hora_inicio:
+        return None
+    
+    # normalizar formato HH:MM -> HH:MM:00 para comparar con TIME() en SQL
+    if isinstance(hora_inicio, str) and len(hora_inicio.split(':')) == 2:
+        hora_inicio = hora_inicio + ':00'
+    if hora_fin and isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+        hora_fin = hora_fin + ':00'
+    
+    # Buscar un turno con esas horas (comparando TIME)
+    query = "SELECT id_turno FROM turno WHERE TIME(hora_inicio) = %s "
+    params = [hora_inicio]
+    if hora_fin:
+        query += "AND TIME(hora_fin) = %s"
+        params.append(hora_fin)
+    query += " LIMIT 1"
+    
+    resultado = execute_query(query, tuple(params), role='readonly')
+    if not resultado:
+        return None
+    
+    return resultado[0]['id_turno']
 
 
 @reserva_bp.route('/', methods=['GET'])
