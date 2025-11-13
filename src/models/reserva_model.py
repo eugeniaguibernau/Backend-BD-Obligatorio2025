@@ -35,6 +35,36 @@ def validar_reglas_negocio(datos):
     if conflicto and conflicto > 0:
         return False, "La sala/turno ya está reservada en ese horario."
 
+    # Validar que el turno existe y es un bloque de 1 hora dentro del horario permitido (08:00-23:00)
+    cursor.execute("SELECT TIME(hora_inicio) as hora_inicio, TIME(hora_fin) as hora_fin, TIMEDIFF(hora_fin,hora_inicio) as duracion FROM turno WHERE id_turno = %s", (id_turno,))
+    turno = cursor.fetchone()
+    if not turno:
+        return False, "Turno inválido."
+    # duracion debe ser exactamente 01:00:00
+    duracion = turno.get('duracion') if isinstance(turno, dict) else turno[2]
+    # aceptar timedelta(1 hour) o strings '01:00:00'/'1:00:00'
+    from datetime import timedelta
+    if hasattr(duracion, 'total_seconds'):
+        if duracion != timedelta(hours=1):
+            return False, "Solo se permiten turnos de 1 hora."
+    else:
+        ds = str(duracion)
+        if ds not in ('01:00:00', '1:00:00'):
+            return False, "Solo se permiten turnos de 1 hora."
+    hi = turno.get('hora_inicio') if isinstance(turno, dict) else turno[0]
+    hf = turno.get('hora_fin') if isinstance(turno, dict) else turno[1]
+    # normalizar a string HH:MM:SS para comparar
+    hi_s = str(hi) if not isinstance(hi, str) else hi
+    hf_s = str(hf) if not isinstance(hf, str) else hf
+    # horario permitido: hora_inicio >= 08:00:00 y hora_fin <= 23:00:00
+    try:
+        hi_hour = int(hi_s.split(':')[0])
+        hf_hour = int(hf_s.split(':')[0])
+        if hi_hour < 8 or hf_hour > 23:
+            return False, "Turno fuera del horario permitido (08:00-23:00)."
+    except Exception:
+        return False, "Turno inválido: formato de hora inesperado."
+
     # Verificar sanciones vigentes por participante
     for ci in participantes:
         cursor.execute("""
@@ -62,32 +92,32 @@ def validar_reglas_negocio(datos):
         if tipo_sala == 'posgrado' and programa['tipo'] != 'posgrado':
             return False, f"La sala {nombre_sala} es exclusiva de posgrado."
 
-    if tipo_sala == 'libre':
-        for ci in participantes:
-            cursor.execute("""
-                SELECT COUNT(*) AS cantidad
-                FROM reserva_participante rp
-                JOIN reserva r ON rp.id_reserva = r.id_reserva
-                WHERE rp.ci_participante = %s AND r.fecha = %s AND r.estado = 'activa'
-            """, (ci, fecha))
-            horas = cursor.fetchone()['cantidad']
-            if horas >= 2:
-                return False, f"El participante {ci} ya tiene 2 horas reservadas ese día."
+    # Reglas globales para participantes: máximo 2 horas/día y 3 reservas activas/semana
+    for ci in participantes:
+        cursor.execute("""
+            SELECT COUNT(*) AS cantidad
+            FROM reserva_participante rp
+            JOIN reserva r ON rp.id_reserva = r.id_reserva
+            WHERE rp.ci_participante = %s AND r.fecha = %s AND r.estado = 'activa'
+        """, (ci, fecha))
+        horas = cursor.fetchone()['cantidad']
+        if horas >= 2:
+            return False, f"El participante {ci} ya tiene 2 horas reservadas ese día."
 
-            fecha_base = datetime.strptime(fecha, '%Y-%m-%d').date()
-            inicio_semana = fecha_base - timedelta(days=fecha_base.weekday())
-            fin_semana = inicio_semana + timedelta(days=6)
-            cursor.execute("""
-                SELECT COUNT(*) AS cantidad
-                FROM reserva_participante rp
-                JOIN reserva r ON rp.id_reserva = r.id_reserva
-                WHERE rp.ci_participante = %s
-                AND r.fecha BETWEEN %s AND %s
-                AND r.estado = 'activa'
-            """, (ci, inicio_semana, fin_semana))
-            activas = cursor.fetchone()['cantidad']
-            if activas >= 3:
-                return False, f"El participante {ci} ya tiene 3 reservas activas esta semana."
+        fecha_base = datetime.strptime(fecha, '%Y-%m-%d').date()
+        inicio_semana = fecha_base - timedelta(days=fecha_base.weekday())
+        fin_semana = inicio_semana + timedelta(days=6)
+        cursor.execute("""
+            SELECT COUNT(*) AS cantidad
+            FROM reserva_participante rp
+            JOIN reserva r ON rp.id_reserva = r.id_reserva
+            WHERE rp.ci_participante = %s
+            AND r.fecha BETWEEN %s AND %s
+            AND r.estado = 'activa'
+        """, (ci, inicio_semana, fin_semana))
+        activas = cursor.fetchone()['cantidad']
+        if activas >= 3:
+            return False, f"El participante {ci} ya tiene 3 reservas activas esta semana."
 
     cursor.close()
     conexion.close()

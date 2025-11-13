@@ -75,6 +75,10 @@ def crear_reserva_ruta():
         if campo not in datos:
             return jsonify({'error': f'Falta el campo obligatorio: {campo}'}), 400
 
+    # participantes debe ser una lista no vacía
+    if not isinstance(datos.get('participantes'), list) or len(datos.get('participantes')) == 0:
+        return jsonify({'error': 'participantes debe ser una lista no vacía con los CI de los participantes'}), 400
+
     # Debe suministrarse o bien id_turno o bien hora_inicio (y opcionalmente hora_fin)
     if 'id_turno' not in datos and 'hora_inicio' not in datos:
         return jsonify({'error': 'Falta el identificador de turno: envía id_turno o hora_inicio'}), 400
@@ -88,6 +92,33 @@ def crear_reserva_ruta():
         if 'id_turno' not in datos and 'hora_inicio' in datos:
             hora_inicio = datos.get('hora_inicio')
             hora_fin = datos.get('hora_fin')
+            # normalizar formato HH:MM -> HH:MM:00 para comparar con TIME() en SQL
+            if isinstance(hora_inicio, str) and len(hora_inicio.split(':')) == 2:
+                hora_inicio = hora_inicio + ':00'
+            if hora_fin and isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+                hora_fin = hora_fin + ':00'
+            # exigir que hora_inicio esté alineada en minuto 00 (bloque de hora)
+            try:
+                parts = hora_inicio.split(':')
+                hi_h = int(parts[0])
+                hi_m = int(parts[1]) if len(parts) > 1 else 0
+                if hi_m != 0:
+                    return jsonify({'error': 'Los turnos deben empezar en minuto 00 (ej: 08:00, 09:00)'}), 400
+            except Exception:
+                return jsonify({'error': 'Formato de hora inválido. Use HH:MM o HH:MM:SS'}), 400
+            # si se envía hora_fin, exigir que sea exactamente una hora después (bloque de 1 hora)
+            if hora_fin:
+                try:
+                    # coger solo horas y minutos (ignorar segundos si existen)
+                    hi_parts = hora_inicio.split(':')[:2]
+                    hf_parts = hora_fin.split(':')[:2]
+                    hi_h, hi_m = map(int, hi_parts)
+                    hf_h, hf_m = map(int, hf_parts)
+                    # construir simple diferencia en horas
+                    if hf_m != 0 or (hf_h - hi_h) not in (1, -23):
+                        return jsonify({'error': 'Los turnos deben ser de 1 hora. Si quiere varias horas cree reservas separadas.'}), 400
+                except Exception:
+                    return jsonify({'error': 'Formato de hora inválido. Use HH:MM o HH:MM:SS'}), 400
             # Buscar un turno con esas horas (comparando TIME)
             query = "SELECT id_turno FROM turno WHERE TIME(hora_inicio) = %s "
             params = [hora_inicio]
