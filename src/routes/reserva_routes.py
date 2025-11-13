@@ -257,6 +257,67 @@ def eliminar_reserva_ruta(id_reserva: int):
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
 
+@reserva_bp.route('/<int:id_reserva>/participantes', methods=['GET'])
+@jwt_required
+def listar_participantes_reserva(id_reserva: int):
+    """
+    GET /reservas/{id_reserva}/participantes
+    Lista todos los participantes de una reserva con su estado de asistencia.
+    """
+    try:
+        # Verificar que la reserva existe
+        reserva = obtener_reserva(id_reserva)
+        if not reserva:
+            return jsonify({'error': 'Reserva no encontrada'}), 404
+        
+        # Control de acceso: los participantes solo pueden ver sus propias reservas
+        if g.user_type != 'admin':
+            # Verificar que el usuario es parte de la reserva
+            query_check = """
+                SELECT 1 FROM reserva_participante 
+                WHERE id_reserva = %s AND ci_participante = %s
+            """
+            resultado = execute_query(query_check, (id_reserva, g.user_id), role='readonly')
+            if not resultado:
+                return jsonify({'error': 'No tienes permiso para ver esta reserva'}), 403
+        
+        # Obtener lista de participantes con información detallada
+        query = """
+            SELECT 
+                rp.ci_participante,
+                p.nombre,
+                p.apellido,
+                p.email,
+                rp.asistencia
+            FROM reserva_participante rp
+            JOIN participante p ON rp.ci_participante = p.ci
+            WHERE rp.id_reserva = %s
+            ORDER BY p.apellido, p.nombre
+        """
+        participantes = execute_query(query, (id_reserva,), role='readonly')
+        
+        # Formatear respuesta
+        participantes_formateados = []
+        for p in participantes:
+            participantes_formateados.append({
+                'ci': p['ci_participante'],
+                'nombre': p['nombre'],
+                'apellido': p['apellido'],
+                'email': p['email'],
+                'asistencia': bool(p['asistencia']) if p['asistencia'] is not None else False
+            })
+        
+        return jsonify({
+            'ok': True,
+            'id_reserva': id_reserva,
+            'participantes': participantes_formateados,
+            'total': len(participantes_formateados)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+
+
 @reserva_bp.route('/<int:id_reserva>/participantes/<int:ci>/asistencia', methods=['POST'])
 @jwt_required
 def marcar_asistencia_ruta(id_reserva: int, ci: int):
