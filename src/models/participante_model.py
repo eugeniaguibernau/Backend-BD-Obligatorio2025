@@ -63,22 +63,76 @@ def create_participante(ci: int, nombre: str, apellido: str, email: str) -> int:
 
 
 def get_participante_by_ci(ci: int) -> Optional[Dict[str, Any]]:
-    """Obtiene un participante por CI."""
-    query = "SELECT ci, nombre, apellido, email FROM participante WHERE ci=%s"
+    """Obtiene un participante por CI, incluyendo su tipo/rol si existe."""
+    query = """
+        SELECT 
+            p.ci, 
+            p.nombre, 
+            p.apellido, 
+            p.email,
+            ppa.rol as tipo_participante
+        FROM participante p
+        LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
+        WHERE p.ci = %s
+        LIMIT 1
+    """
     rows = execute_query(query, (ci,), role='readonly')
-    return rows[0] if rows else None
+    if rows:
+        # Si tiene múltiples programas, solo tomamos el primero
+        # El tipo_participante será 'alumno', 'docente' o None
+        result = rows[0].copy()
+        # Normalizar el valor para el frontend
+        if result.get('tipo_participante'):
+            tipo = result['tipo_participante']
+            # Mapear a los valores esperados por el frontend
+            if tipo == 'alumno':
+                result['tipo_participante'] = 'Estudiante'
+            elif tipo == 'docente':
+                result['tipo_participante'] = 'Docente'
+        return result
+    return None
 
 
 def get_participante_by_email(email: str) -> Optional[Dict[str, Any]]:
-    """Obtiene un participante por email."""
-    query = "SELECT ci, nombre, apellido, email FROM participante WHERE email=%s"
+    """Obtiene un participante por email, incluyendo su tipo/rol si existe."""
+    query = """
+        SELECT 
+            p.ci, 
+            p.nombre, 
+            p.apellido, 
+            p.email,
+            ppa.rol as tipo_participante
+        FROM participante p
+        LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
+        WHERE p.email = %s
+        LIMIT 1
+    """
     rows = execute_query(query, (email,), role='readonly')
-    return rows[0] if rows else None
+    if rows:
+        result = rows[0].copy()
+        # Normalizar el valor para el frontend
+        if result.get('tipo_participante'):
+            tipo = result['tipo_participante']
+            if tipo == 'alumno':
+                result['tipo_participante'] = 'Estudiante'
+            elif tipo == 'docente':
+                result['tipo_participante'] = 'Docente'
+        return result
+    return None
 
 
 def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Lista todos los participantes con paginación opcional."""
-    query = "SELECT ci, nombre, apellido, email FROM participante"
+    """Lista todos los participantes con paginación opcional, incluyendo su tipo/rol."""
+    query = """
+        SELECT 
+            p.ci, 
+            p.nombre, 
+            p.apellido, 
+            p.email,
+            ppa.rol as tipo_participante
+        FROM participante p
+        LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
+    """
     params = []
     
     if limit is not None:
@@ -88,7 +142,21 @@ def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None
             query += " OFFSET %s"
             params.append(offset)
     
-    return execute_query(query, tuple(params) if params else None, role='readonly')
+    rows = execute_query(query, tuple(params) if params else None, role='readonly')
+    
+    # Normalizar los valores para el frontend
+    result = []
+    for row in rows:
+        item = row.copy()
+        if item.get('tipo_participante'):
+            tipo = item['tipo_participante']
+            if tipo == 'alumno':
+                item['tipo_participante'] = 'Estudiante'
+            elif tipo == 'docente':
+                item['tipo_participante'] = 'Docente'
+        result.append(item)
+    
+    return result
 
 
 def update_participante(ci: int, nombre: Optional[str] = None, 
@@ -213,15 +281,23 @@ def get_participante_with_programs(ci: int) -> Optional[Dict[str, Any]]:
         'nombre': rows[0]['nombre'],
         'apellido': rows[0]['apellido'],
         'email': rows[0]['email'],
+        'tipo_participante': None,  # Se asignará con el primer rol encontrado
         'programas': []
     }
     
     for row in rows:
         if row['nombre_programa']:  # Si tiene programa asociado
+            # Asignar tipo_participante con el primer rol encontrado
+            if participante['tipo_participante'] is None and row['rol']:
+                if row['rol'] == 'alumno':
+                    participante['tipo_participante'] = 'Estudiante'
+                elif row['rol'] == 'docente':
+                    participante['tipo_participante'] = 'Docente'
+            
             participante['programas'].append({
                 'id_alumno_programa': row['id_alumno_programa'],
                 'nombre_programa': row['nombre_programa'],
-                'rol': row['rol']
+                'rol': 'Estudiante' if row['rol'] == 'alumno' else 'Docente' if row['rol'] == 'docente' else row['rol']
             })
     
     return participante
