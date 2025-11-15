@@ -175,17 +175,69 @@ def update_participante_route(ci: int):
         if not existing:
             return jsonify({'error': 'participante not found'}), 404
 
+        # Compatibility: accept either 'tipo_participante' (canonical) or 'tipo' (label)
+        provided_canonical = data.get('tipo_participante') if 'tipo_participante' in data else None
+        provided_label = data.get('tipo') if 'tipo' in data else None
+
+        # Helper to derive canonical from a label (e.g. 'Postgrado' -> 'postgrado')
+        def canonical_from_label(label: str):
+            if not label:
+                return None
+            l = str(label).strip().lower()
+            if l in ('estudiante', 'alumno'):
+                return 'alumno'
+            if l == 'postgrado':
+                return 'postgrado'
+            if l in ('docente', 'profesor'):
+                return 'docente'
+            return l
+
+        # If both provided, validate they match (avoid silent mismatches from frontend)
+        if provided_canonical is not None and provided_label is not None:
+            canon_norm = str(provided_canonical).strip().lower()
+            canon_from_label = canonical_from_label(provided_label)
+            if canon_from_label is not None and canon_norm != canon_from_label:
+                return jsonify({'error': 'Inconsistencia entre tipo_participante y tipo',
+                                'tipo_participante': provided_canonical,
+                                'tipo': provided_label,
+                                'detalle': f"tipo_participante '{provided_canonical}' no coincide con tipo '{provided_label}' (esperado canonical '{canon_from_label}')"}), 400
+
+        # Decide which raw value to use for normalization: prefer canonical if present
+        raw_tipo = provided_canonical if provided_canonical is not None else provided_label
+        # Compatibility for programa name
+        programa = data.get('programa_academico') if 'programa_academico' in data else data.get('programa')
+
+        tipo_canonical = None
+        if raw_tipo is not None:
+            if not str(raw_tipo).strip():
+                return jsonify({'error': 'tipo_participante cannot be empty'}), 400
+            rt = str(raw_tipo).lower()
+            if rt in ('estudiante', 'alumno'):
+                tipo_canonical = 'alumno'
+            elif rt == 'postgrado':
+                tipo_canonical = 'postgrado'
+            elif rt in ('docente', 'profesor'):
+                tipo_canonical = 'docente'
+            elif rt == 'otro':
+                tipo_canonical = 'otro'
+            else:
+                return jsonify({'error': 'tipo_participante inválido'}), 400
+
         affected = update_participante(
             ci,
             nombre=data.get('nombre'),
             apellido=data.get('apellido'),
             email=data.get('email'),
+            tipo_participante=tipo_canonical,
+            programa_academico=programa,
         )
 
         if affected == 0:
             return jsonify({'message': 'no changes made', 'updated': 0}), 200
 
-        return jsonify({'updated': affected}), 200
+        # Return the updated participante for frontend convenience
+        updated = get_participante_by_ci(ci)
+        return jsonify({'updated': affected, 'participante': updated}), 200
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
