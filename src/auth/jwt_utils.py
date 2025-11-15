@@ -38,6 +38,8 @@ def verify_token(token: str):
     try:
         data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return True, data
+    except jwt.ExpiredSignatureError:
+        return False, 'expired'
     except Exception as e:
         return False, str(e)
 
@@ -67,6 +69,9 @@ def jwt_required(fn):
         token = auth.split(' ', 1)[1].strip()
         ok, payload_or_err = verify_token(token)
         if not ok:
+            # Token expired -> 401 with clear message so frontend can logout
+            if payload_or_err == 'expired':
+                return jsonify({'ok': False, 'error': 'Token expired'}), 401
             return jsonify({'ok': False, 'mensaje': 'Token inválido', 'detalle': payload_or_err}), 401
         
         # Extraer información del usuario del token

@@ -81,7 +81,7 @@ CREATE TABLE reserva(
     edificio VARCHAR(20) NOT NULL,
     fecha DATE NOT NULL,
     id_turno INT,
-    estado enum('activa','cancelada','sin asistencia','finalizada') NOT NULL,
+    estado enum('activa','cancelada','sin asistencia','asistida','finalizada') NOT NULL,
     PRIMARY KEY(id_reserva),
     FOREIGN KEY (nombre_sala,edificio) REFERENCES sala(nombre_sala,edificio),
     FOREIGN KEY (id_turno) REFERENCES  turno(id_turno)
@@ -98,9 +98,14 @@ CREATE TABLE reserva_participante(
 );
 
 CREATE TABLE sancion_participante(
+    id_sancion INT AUTO_INCREMENT PRIMARY KEY,
     ci_participante INT,
     fecha_inicio DATE,
     fecha_fin DATE,
-    PRIMARY KEY (ci_participante,fecha_inicio,fecha_fin),
+    creado_por VARCHAR(100) NULL,
+    creado_en TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100) NULL,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY ux_sancion_unique (ci_participante, fecha_inicio, fecha_fin),
     FOREIGN KEY (ci_participante) REFERENCES participante_programa_academico(ci_participante)
 );
