@@ -71,10 +71,12 @@ def create_participante(ci: int, nombre: str, apellido: str, email: str,
             tipo_norm = tipo_participante.lower()
             if tipo_norm in ('estudiante', 'alumno'):
                 tipo_db = 'alumno'
+            elif tipo_norm == 'postgrado':
+                tipo_db = 'postgrado'
             elif tipo_norm in ('docente', 'profesor'):
                 tipo_db = 'docente'
             else:
-                raise ValueError("tipo_participante inválido: debe ser 'alumno' o 'docente' (o 'Estudiante'/'Docente').")
+                raise ValueError("tipo_participante inválido: debe ser 'alumno', 'postgrado' o 'docente' (ej. 'Estudiante'/'Postgrado'/'Docente').")
 
             # add_program_to_participante usa execute_non_query internamente
             # y validará que el programa exista.
@@ -116,6 +118,8 @@ def get_participante_by_ci(ci: int) -> Optional[Dict[str, Any]]:
             tipo = result['tipo_participante']
             if tipo == 'alumno':
                 result['tipo_participante'] = 'Estudiante'
+            elif tipo == 'postgrado':
+                result['tipo_participante'] = 'Postgrado'
             elif tipo == 'docente':
                 result['tipo_participante'] = 'Docente'
         else:
@@ -150,6 +154,8 @@ def get_participante_by_email(email: str) -> Optional[Dict[str, Any]]:
             tipo = result['tipo_participante']
             if tipo == 'alumno':
                 result['tipo_participante'] = 'Estudiante'
+            elif tipo == 'postgrado':
+                result['tipo_participante'] = 'Postgrado'
             elif tipo == 'docente':
                 result['tipo_participante'] = 'Docente'
         else:
@@ -192,6 +198,8 @@ def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None
             tipo = item['tipo_participante']
             if tipo == 'alumno':
                 item['tipo_participante'] = 'Estudiante'
+            elif tipo == 'postgrado':
+                item['tipo_participante'] = 'Postgrado'
             elif tipo == 'docente':
                 item['tipo_participante'] = 'Docente'
         else:
@@ -206,7 +214,9 @@ def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None
 
 def update_participante(ci: int, nombre: Optional[str] = None, 
                        apellido: Optional[str] = None, 
-                       email: Optional[str] = None) -> int:
+                       email: Optional[str] = None,
+                       tipo_participante: Optional[str] = None,
+                       programa_academico: Optional[str] = None) -> int:
     """
     Actualiza datos de un participante.
     Solo actualiza los campos proporcionados (no None).
@@ -242,13 +252,73 @@ def update_participante(ci: int, nombre: Optional[str] = None,
         params.append(email)
     
     if not sets:
-        return 0
+        # No updates to participante table, but maybe program/rol needs update
+        participant_updates = 0
+    else:
+        participant_updates = None
     
     params.append(ci)
-    query = f"UPDATE participante SET {', '.join(sets)} WHERE ci=%s"
-    
+    query = f"UPDATE participante SET {', '.join(sets)} WHERE ci=%s" if sets else None
+
+    total_affected = 0
     try:
-        return execute_non_query(query, tuple(params), role='user')
+        if query:
+            total_affected += execute_non_query(query, tuple(params), role='user')
+
+        # Handle programa_academico / tipo_participante updates in participante_programa_academico
+        program_ops = 0
+        if tipo_participante is not None or programa_academico is not None:
+            # Normalize role if provided
+            role_db = None
+            if tipo_participante is not None:
+                t = tipo_participante.lower()
+                if t in ('estudiante', 'alumno'):
+                    role_db = 'alumno'
+                elif t == 'postgrado':
+                    role_db = 'postgrado'
+                elif t in ('docente', 'profesor'):
+                    role_db = 'docente'
+                elif t == 'otro':
+                    role_db = 'otro'
+                else:
+                    raise ValueError("tipo_participante inválido: debe ser 'alumno', 'postgrado' o 'docente' (ej. 'Estudiante'/'Postgrado'/'Docente').")
+
+            # Check existing association
+            existing = execute_query(
+                "SELECT nombre_programa, rol FROM participante_programa_academico WHERE ci_participante = %s",
+                (ci,),
+                role='readonly'
+            )
+
+            if existing:
+                existing_row = existing[0]
+                new_program = programa_academico if programa_academico is not None else existing_row.get('nombre_programa')
+                new_role = role_db if role_db is not None else existing_row.get('rol')
+
+                # Validate program exists
+                if new_program is None:
+                    raise ValueError("programa_academico no encontrado y no se proveyó uno nuevo")
+
+                exists_program = execute_query(
+                    "SELECT 1 FROM programa_academico WHERE nombre_programa = %s LIMIT 1",
+                    (new_program,),
+                    role='readonly'
+                )
+                if not exists_program:
+                    raise ValueError(f"Programa académico no encontrado: {new_program}")
+
+                # Update association
+                query_up = "UPDATE participante_programa_academico SET nombre_programa = %s, rol = %s WHERE ci_participante = %s"
+                program_ops = execute_non_query(query_up, (new_program, new_role, ci), role='user')
+            else:
+                # No existing association: require both program and tipo
+                if not programa_academico or not role_db:
+                    raise ValueError("Para asociar un programa se requieren 'programa_academico' y 'tipo_participante'.")
+                program_ops = add_program_to_participante(ci, programa_academico, role_db)
+
+            total_affected += program_ops
+
+        return total_affected
     except pymysql.IntegrityError as e:
         if 'Duplicate entry' in str(e) and 'email' in str(e):
             raise ValueError(f"Ya existe un participante con email {email}")
@@ -370,13 +440,15 @@ def get_participante_with_programs(ci: int) -> Optional[Dict[str, Any]]:
             if participante['tipo_participante'] is None and row['rol']:
                 if row['rol'] == 'alumno':
                     participante['tipo_participante'] = 'Estudiante'
+                elif row['rol'] == 'postgrado':
+                    participante['tipo_participante'] = 'Postgrado'
                 elif row['rol'] == 'docente':
                     participante['tipo_participante'] = 'Docente'
             
             participante['programas'].append({
                 'id_alumno_programa': row['id_alumno_programa'],
                 'nombre_programa': row['nombre_programa'],
-                'rol': 'Estudiante' if row['rol'] == 'alumno' else 'Docente' if row['rol'] == 'docente' else row['rol']
+                'rol': 'Estudiante' if row['rol'] == 'alumno' else 'Postgrado' if row['rol'] == 'postgrado' else 'Docente' if row['rol'] == 'docente' else row['rol']
             })
     
     return participante
@@ -406,8 +478,8 @@ def add_program_to_participante(ci: int, nombre_programa: str, rol: str) -> int:
         raise ValueError("nombre_programa es requerido para asociar un programa")
 
     rol_norm = rol.lower() if rol else ''
-    if rol_norm not in ('alumno', 'docente'):
-        raise ValueError("rol inválido: debe ser 'alumno' o 'docente'")
+    if rol_norm not in ('alumno', 'docente', 'postgrado'):
+        raise ValueError("rol inválido: debe ser 'alumno', 'postgrado' o 'docente'")
 
     # Comprobar que el programa existe
     exists = execute_query(
