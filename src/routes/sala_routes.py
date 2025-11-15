@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from typing import Any, Dict
-from src.models.sql_sala import (
+from src.models.sala_model import (
     create_sala,
     get_sala,
     list_salas,

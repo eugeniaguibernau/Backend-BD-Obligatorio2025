@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from src.config.database import execute_query
 from src.auth.jwt_utils import jwt_required
 
@@ -63,6 +63,11 @@ def most_reserved_rooms():
             'total': len(results)
         })), 200
     except Exception as e:
+        # Log full traceback for debugging
+        try:
+            current_app.logger.exception(e)
+        except Exception:
+            pass
         return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
 
 
@@ -574,10 +579,11 @@ def peak_hours_by_room():
     
     query = """
         SELECT 
-            r.nombre_sala, r.edificio, r.id_turno, t.horario_inicio, t.horario_fin, COUNT(r.id_reserva) as total_reservas,
-            COUNT(DISTINCT r.fecha) as dias_diferentes
+            r.nombre_sala, r.edificio, s.tipo_sala, r.id_turno, t.hora_inicio, t.hora_fin, COUNT(r.id_reserva) as total_reservas,
+            COUNT(DISTINCT r.fecha) as dias_diferentes, e.departamento
         FROM reserva r
         JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
+        JOIN edificio e ON r.edificio = e.nombre_edificio
         JOIN turno t ON r.id_turno = t.id_turno
     """
     
@@ -600,7 +606,7 @@ def peak_hours_by_room():
         query += " WHERE " + " AND ".join(filters)
     
     query += """
-        GROUP BY r.nombre_sala, r.edificio, s.tipo_sala, r.id_turno, t.horario_inicio, t.horario_fin
+    GROUP BY r.nombre_sala, r.edificio, s.tipo_sala, r.id_turno, t.hora_inicio, t.hora_fin
         ORDER BY r.nombre_sala, r.edificio, total_reservas DESC
     """
     
@@ -623,20 +629,67 @@ def peak_hours_by_room():
                     'nombre_sala': row['nombre_sala'],
                     'edificio': row['edificio'],
                     'tipo_sala': row['tipo_sala'],
+                    # include departamento/unidad information from edificio table so frontend
+                    # can find a faculty-like property (many frontends look for departamento/unidad)
+                    'departamento': row.get('departamento'),
+                    'unidad': row.get('departamento'),
+                    # the domain model doesn't attach a "facultad" to a sala directly; provide
+                    # placeholder keys so UI checks for multiple possible names succeed.
+                    'facultad': None,
+                    'facultad_nombre': None,
+                    'faculty': None,
+                    'fac': None,
                     'turnos': []
                 }
             
+            # build both a raw structured object and a human-readable label
+            horario_inicio = str(row['hora_inicio'])
+            horario_fin = str(row['hora_fin'])
+            total_res = row['total_reservas']
+            dias = row['dias_diferentes']
+
             salas_dict[sala_key]['turnos'].append({
                 'id_turno': row['id_turno'],
-                'horario_inicio': str(row['horario_inicio']),
-                'horario_fin': str(row['horario_fin']),
-                'total_reservas': row['total_reservas'],
-                'dias_diferentes': row['dias_diferentes']
+                'horario_inicio': horario_inicio,
+                'horario_fin': horario_fin,
+                'total_reservas': total_res,
+                'dias_diferentes': dias
             })
         
-        # Convertir a lista
-        salas_list = list(salas_dict.values())
-        
+        # Convertir a lista y generar etiquetas legibles para el frontend
+        salas_list = []
+        for sala in salas_dict.values():
+            turnos_raw = sala.get('turnos', [])
+            turnos_display = []
+            for t in turnos_raw:
+                # normalize hora strings to HH:MM
+                raw_hi = t.get('horario_inicio') or t.get('hora_inicio') or ''
+                raw_hf = t.get('horario_fin') or t.get('hora_fin') or ''
+                # try to extract time portion (handles 'YYYY-MM-DD HH:MM:SS' or 'HH:MM:SS')
+                def time_short(s):
+                    s = str(s)
+                    if ' ' in s:
+                        part = s.split(' ')[-1]
+                    else:
+                        part = s
+                    # take HH:MM
+                    return part[:5] if len(part) >= 5 else part
+
+                hi = time_short(raw_hi)
+                hf = time_short(raw_hf)
+                cnt = t.get('total_reservas', 0)
+                dias = t.get('dias_diferentes', 0)
+                # cleaner label: "08:00–10:00 — 12 reservas (5 días)"
+                label = f"{hi}–{hf} — {cnt} reservas ({dias} días)"
+                turnos_display.append(label)
+
+            salas_list.append({
+                'nombre_sala': sala['nombre_sala'],
+                'edificio': sala['edificio'],
+                'tipo_sala': sala.get('tipo_sala'),
+                'turnos': turnos_display
+            })
+
         return jsonify({
             'total_salas': len(salas_list),
             'salas': salas_list
@@ -715,8 +768,6 @@ def occupancy_by_room_type():
             if tipo in capacidades:
                 cap_info = capacidades[tipo]
                 total_salas = cap_info['total_salas']
-                
-                # Estimación de slots disponibles (asumiendo ~5 turnos promedio por día)
                 dias = row['dias_con_reservas'] or 1
                 slots_disponibles = total_salas * dias * 5
                 

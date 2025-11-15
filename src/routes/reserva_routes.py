@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, g
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from src.models.reserva_model import (
     crear_reserva,
     listar_reservas,
@@ -9,10 +9,10 @@ from src.models.reserva_model import (
     validar_reglas_negocio,
     marcar_asistencia
 )
-from src.models.sancion_model import aplicar_sanciones_por_reserva
+from src.models.sancion_model import aplicar_sanciones_por_reserva, eliminar_sancion
 from src.auth.jwt_utils import jwt_required
 from src.middleware.permissions import require_admin
-from src.config.database import execute_query
+from src.config.database import execute_query, execute_non_query
 
 reserva_bp = Blueprint('reserva_bp', __name__)
 
@@ -22,7 +22,7 @@ def _compute_estado_actual(reserva):
 
     Estados posibles devueltos:
     - 'activa' (fecha futura)
-    - 'finalizada' (fecha pasada y hubo asistencia)
+    - 'finalizada' (fecha pasada y hubo asistencia)  -- now we also support 'asistida' as an explicit attended state
     - 'sin asistencia' (fecha pasada y nadie asistió)
     - 'cancelada' (si ya está cancelada en la DB)
     - cualquier estado distinto almacenado se devuelve tal cual
@@ -31,10 +31,31 @@ def _compute_estado_actual(reserva):
     estado_guardado = (reserva.get('estado') or '').strip().lower()
     if estado_guardado == 'cancelada':
         return 'cancelada'
+
+    # Si el estado guardado es distinto de 'activa' tenemos que tratar
+    # algunos casos especiales:
+    # - si está 'finalizada' y hay al menos 1 asistencia registrada, devolver 'asistida'
+    # - si está 'finalizada' y NO hubo asistencia, devolver 'sin asistencia' (para indicar sanción)
+    # - para otros estados no-activa, devolver tal cual
     if estado_guardado and estado_guardado != 'activa':
+        if estado_guardado == 'finalizada':
+            # revisar asistencia para distinguir entre 'asistida' y 'sin asistencia'
+            try:
+                resultado_true = execute_query(
+                    "SELECT COUNT(*) as c FROM reserva_participante WHERE id_reserva=%s AND asistencia=1",
+                    (reserva.get('id_reserva'),),
+                    role='readonly'
+                )
+                cnt_true = resultado_true[0]['c'] if resultado_true else 0
+                if cnt_true and cnt_true > 0:
+                    return 'asistida'
+                return 'sin asistencia'
+            except Exception:
+                # En caso de error consultando asistencia, devolvemos el estado guardado
+                return estado_guardado
         return estado_guardado
 
-    # Solo calculamos para reservas que en DB están como 'activa'
+    # Solo calculamos para reservas que en DB están como 'activa' (o sin estado)
     fecha_res = reserva.get('fecha')
     try:
         if isinstance(fecha_res, str):
@@ -60,7 +81,8 @@ def _compute_estado_actual(reserva):
     )
     cnt_true = resultado_true[0]['c'] if resultado_true else 0
     if cnt_true and cnt_true > 0:
-        return 'finalizada'
+        # Use 'asistida' as the canonical state when there was attendance
+        return 'asistida'
 
     # Ninguno asistió/registrado
     return 'sin asistencia'
@@ -261,7 +283,8 @@ def actualizar_reserva_ruta(id_reserva: int):
     """
     Actualiza una reserva. Si el body incluye 'estado' con alguno de:
     - 'sin asistencia'  (regla: sanción solo si NADIE asistió)
-    - 'finalizada'      (opcional: lo tratamos como cierre y revisamos sanción)
+    - 'finalizada'      (opcional: lo tratamos como cierre)
+    - 'asistida'        (indica que hubo asistencia y NO se deben generar sanciones)
     - 'cerrada'         (opcional: idem)
     entonces se evalúa y aplican sanciones según la regla pedida.
     """
@@ -273,15 +296,74 @@ def actualizar_reserva_ruta(id_reserva: int):
             resultado = execute_query(query, (id_reserva, g.user_id), role='readonly')
             if not resultado or resultado[0]['count'] == 0:
                 return jsonify({'error': 'No tienes permiso para modificar esta reserva'}), 403
-        
-        # 1) Actualizamos la reserva
+
+        # Mapear 'asistida' -> 'finalizada' antes de guardar si el cliente lo pidió,
+        # para evitar tocar el ENUM de la BD. Devolvemos el valor solicitado en la respuesta.
+        estado_solicitado = (datos.get('estado') or '').strip().lower()
+        if estado_solicitado == 'asistida':
+            datos['estado'] = 'finalizada'
+
+        # Actualizar la reserva en la BD
         filas_afectadas = actualizar_reserva(id_reserva, datos)
 
-        # 2) Si el estado nuevo indica cierre/ausencia, aplicamos la regla de sanción
-        estado_nuevo = (datos.get('estado') or '').strip().lower()
-        debe_aplicar_sancion = estado_nuevo in ('sin asistencia', 'finalizada', 'cerrada')
+        # Construir respuesta básica
+        respuesta = {
+            'reservas_actualizadas': filas_afectadas,
+            'estado_aplicado': estado_solicitado or None
+        }
 
-        respuesta = {'reservas_actualizadas': filas_afectadas}
+        # Si el usuario pidió explícitamente 'asistida', marcar asistencia en reserva_participante
+        # para reflejar que hubo asistencia y evitar generación de sanciones.
+        if estado_solicitado == 'asistida':
+            try:
+                updated = execute_non_query(
+                    "UPDATE reserva_participante SET asistencia = 1 WHERE id_reserva = %s",
+                    (id_reserva,)
+                )
+                respuesta['asistencia_marcada'] = updated
+            except Exception as e:
+                # No detener el proceso por este fallo; devolver un campo con el error para diagnóstico
+                respuesta['asistencia_marcada_error'] = str(e)
+            # Además, eliminar sanciones previamente creadas para los participantes
+            # (posible escenario: el procesador vencido ya aplicó sanciones; si ahora se marca
+            # como asistida, debemos removerlas). Usamos la misma ventana por defecto de 60 días.
+            try:
+                reserva_info = obtener_reserva(id_reserva)
+                if reserva_info and reserva_info.get('fecha'):
+                    # normalizar fecha a date
+                    fecha_res = reserva_info.get('fecha')
+                    if isinstance(fecha_res, str):
+                        fecha_res = datetime.strptime(fecha_res, '%Y-%m-%d').date()
+                    fecha_fin = fecha_res + timedelta(days=60)
+
+                    # obtener participantes
+                    participantes = execute_query(
+                        "SELECT ci_participante FROM reserva_participante WHERE id_reserva = %s",
+                        (id_reserva,),
+                        role='readonly'
+                    )
+                    eliminadas = 0
+                    eliminados_list = []
+                    for p in participantes:
+                        ci = p.get('ci_participante')
+                        try:
+                            filas = eliminar_sancion(ci, fecha_res, fecha_fin)
+                            if filas:
+                                eliminadas += filas
+                                eliminados_list.append(ci)
+                        except Exception:
+                            # ignorar fallos individuales para no abortar la operación
+                            pass
+                    respuesta['sanciones_eliminadas'] = eliminadas
+                    respuesta['sancionados_eliminados_ci'] = eliminados_list
+                else:
+                    respuesta['sanciones_eliminadas_error'] = 'Fecha de reserva no encontrada'
+            except Exception as e:
+                respuesta['sanciones_eliminadas_error'] = str(e)
+
+        # Decidir si debemos aplicar sanciones según el estado que se guardó
+        estado_nuevo = (datos.get('estado') or '').strip().lower()
+        debe_aplicar_sancion = estado_nuevo in ('sin asistencia', 'cerrada')
 
         if debe_aplicar_sancion:
             try:
@@ -289,8 +371,8 @@ def actualizar_reserva_ruta(id_reserva: int):
                 respuesta['sanciones'] = {
                     'aplicadas': resultado.get('insertadas', 0),
                     'sancionados': resultado.get('sancionados', []),
-                    'fecha_inicio': str(resultado.get('fecha_inicio')),
-                    'fecha_fin': str(resultado.get('fecha_fin')),
+                    'fecha_inicio': str(resultado.get('fecha_inicio')) if resultado.get('fecha_inicio') else None,
+                    'fecha_fin': str(resultado.get('fecha_fin')) if resultado.get('fecha_fin') else None,
                     'motivo': resultado.get('motivo')
                 }
             except ValueError as e:
