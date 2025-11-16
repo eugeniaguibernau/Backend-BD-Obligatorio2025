@@ -43,11 +43,10 @@ CREATE TABLE programa_academico (
 );
 
 CREATE TABLE participante_programa_academico (
-                                                          id_alumno_programa int AUTO_INCREMENT,
-                                                          ci_participante int NOT NULL UNIQUE ,
+                                                          ci_participante int NOT NULL,
                                                           nombre_programa VARCHAR(20) NOT NULL ,
                                                           rol enum ('alumno', 'docente', 'postgrado') NOT NULL ,
-                                                          PRIMARY KEY (id_alumno_programa),
+                                                          PRIMARY KEY (ci_participante, nombre_programa, rol),
                                                           FOREIGN KEY (ci_participante) references  participante(ci),
                                                           FOREIGN KEY (nombre_programa) references programa_academico(nombre_programa)
 );
@@ -81,7 +80,7 @@ CREATE TABLE reserva(
     edificio VARCHAR(20) NOT NULL,
     fecha DATE NOT NULL,
     id_turno INT,
-    estado enum('activa','cancelada','sin asistencia','asistida','finalizada') NOT NULL,
+    estado enum('activa','cancelada','sin asistencia','finalizada') NOT NULL,
     PRIMARY KEY(id_reserva),
     FOREIGN KEY (nombre_sala,edificio) REFERENCES sala(nombre_sala,edificio),
     FOREIGN KEY (id_turno) REFERENCES  turno(id_turno)

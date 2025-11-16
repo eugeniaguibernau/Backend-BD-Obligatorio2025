@@ -279,3 +279,51 @@ def get_sanciones_route(ci: int):
     except Exception as e:
         return jsonify({'error': 'internal error', 'detail': str(e)}), 500
 
+
+@participante_bp.route('/<int:ci>/programas', methods=['POST'])
+@jwt_required
+@require_admin
+def add_programa_to_participante_route(ci: int):
+    """Agrega un programa académico y rol a un participante existente.
+    
+    Body esperado:
+    {
+        "programa": "Ing Informática",
+        "tipo": "Estudiante"  // o "Docente"
+    }
+    """
+    try:
+        # Verificar que el participante existe
+        existing = get_participante_by_ci(ci)
+        if not existing:
+            return jsonify({'error': 'participante not found'}), 404
+
+        data = request.get_json() or {}
+        programa = data.get('programa') or data.get('programa_academico')
+        tipo = data.get('tipo') or data.get('tipo_participante')
+
+        if not programa or not tipo:
+            return jsonify({'error': 'programa y tipo son requeridos'}), 400
+
+        # Normalizar tipo
+        tipo_norm = tipo.lower()
+        if tipo_norm in ('estudiante', 'alumno'):
+            tipo_db = 'alumno'
+        elif tipo_norm == 'postgrado':
+            tipo_db = 'postgrado'
+        elif tipo_norm in ('docente', 'profesor'):
+            tipo_db = 'docente'
+        else:
+            return jsonify({'error': 'tipo_participante inválido: debe ser "Estudiante", "Postgrado" o "Docente"'}), 400
+
+        # Agregar el programa
+        affected = add_program_to_participante(ci, programa, tipo_db)
+        
+        # Obtener participante actualizado con todos sus programas
+        updated = get_participante_by_ci(ci)
+        
+        return jsonify({'ok': True, 'participante': updated, 'added': affected}), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': 'internal error', 'detail': str(e)}), 500

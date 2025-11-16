@@ -2,9 +2,10 @@ from flask import Blueprint, request, jsonify, current_app
 import pymysql
 from src.auth.login import hash_password, authenticate_user
 from src.config.database import get_connection
-from src.auth.jwt_utils import create_token
+from src.auth.jwt_utils import create_token, jwt_required
 from src.extensions import limiter
 from src.utils.validators import is_valid_email, is_strong_password, validate_participante
+from src.middleware.permissions import require_admin
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -12,6 +13,8 @@ auth_bp = Blueprint('auth', __name__)
 
 
 @auth_bp.route('/register', methods=['POST'])
+@jwt_required
+@require_admin
 @limiter.limit("2/minute")
 def register():
     data = request.get_json() or {}
@@ -38,6 +41,9 @@ def register():
     ci = participante.get('ci') if participante else None
     nombre = participante.get('nombre') if participante else ''
     apellido = participante.get('apellido') if participante else ''
+    # Nuevos campos: programa y tipo de participante
+    programa = participante.get('programa_academico') or participante.get('programa')
+    tipo = participante.get('tipo_participante') or participante.get('tipo')
 
     try:
         # Comprobar existencia preferentemente por CI (si se envía), sino por email
@@ -61,6 +67,31 @@ def register():
                 "UPDATE participante SET nombre=%s, apellido=%s, email=%s WHERE ci=%s",
                 (nombre, apellido, correo, ci)
             )
+
+        # Si se proporcionó programa y tipo, crear la asociación
+        if programa and tipo and ci:
+            # Normalizar tipo_participante a los valores de DB esperados
+            tipo_norm = tipo.lower()
+            if tipo_norm in ('estudiante', 'alumno'):
+                tipo_db = 'alumno'
+            elif tipo_norm == 'postgrado':
+                tipo_db = 'postgrado'
+            elif tipo_norm in ('docente', 'profesor'):
+                tipo_db = 'docente'
+            else:
+                raise ValueError("tipo_participante inválido: debe ser 'alumno', 'postgrado' o 'docente'")
+
+            # Verificar si ya existe la asociación
+            cur.execute(
+                "SELECT ci_participante FROM participante_programa_academico WHERE ci_participante = %s",
+                (ci,)
+            )
+            if not cur.fetchone():
+                # Crear asociación con programa académico
+                cur.execute(
+                    "INSERT INTO participante_programa_academico (ci_participante, nombre_programa, rol) VALUES (%s, %s, %s)",
+                    (ci, programa, tipo_db)
+                )
 
         # Ahora insertar/actualizar login
         hashed = hash_password(plain)

@@ -93,120 +93,194 @@ def create_participante(ci: int, nombre: str, apellido: str, email: str,
 
 
 def get_participante_by_ci(ci: int) -> Optional[Dict[str, Any]]:
-    """Obtiene un participante por CI, incluyendo su tipo/rol si existe."""
-    query = """
-        SELECT 
-            p.ci, 
-            p.nombre, 
-            p.apellido, 
-            p.email,
-                ppa.rol as tipo_participante,
-                ppa.nombre_programa as programa
-        FROM participante p
-        LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
-        WHERE p.ci = %s
-        LIMIT 1
+    """Obtiene un participante por CI, incluyendo TODOS sus programas y roles."""
+    # Primero obtener datos básicos del participante
+    query_participante = """
+        SELECT ci, nombre, apellido, email
+        FROM participante
+        WHERE ci = %s
     """
-    rows = execute_query(query, (ci,), role='readonly')
-    if rows:
-        # Si tiene múltiples programas, solo tomamos el primero
-        # El tipo_participante será 'alumno', 'docente' o None
-        result = rows[0].copy()
-        # Normalizar el valor para el frontend
-        # Mapear tipo a cadena amigable
-        if result.get('tipo_participante'):
-            tipo = result['tipo_participante']
-            if tipo == 'alumno':
-                result['tipo_participante'] = 'Estudiante'
-            elif tipo == 'postgrado':
-                result['tipo_participante'] = 'Postgrado'
-            elif tipo == 'docente':
-                result['tipo_participante'] = 'Docente'
+    rows = execute_query(query_participante, (ci,), role='readonly')
+    if not rows:
+        return None
+    
+    result = rows[0].copy()
+    
+    # Luego obtener TODOS sus programas y roles
+    query_programas = """
+        SELECT nombre_programa, rol
+        FROM participante_programa_academico
+        WHERE ci_participante = %s
+        ORDER BY nombre_programa, rol
+    """
+    programas_rows = execute_query(query_programas, (ci,), role='readonly')
+    
+    # Construir array de programas con roles normalizados
+    programas = []
+    for row in programas_rows:
+        rol_db = row.get('rol')
+        # Normalizar rol para el frontend
+        if rol_db == 'alumno':
+            rol_display = 'Estudiante'
+        elif rol_db == 'postgrado':
+            rol_display = 'Postgrado'
+        elif rol_db == 'docente':
+            rol_display = 'Docente'
         else:
-            result['tipo_participante'] = None
-
-        # Añadir campo 'programa' para el frontend (nombre del programa o None)
-        result['programa'] = result.get('programa') if result.get('programa') else None
-        return result
-    return None
+            rol_display = rol_db
+        
+        programas.append({
+            'programa': row.get('nombre_programa'),
+            'tipo': rol_display
+        })
+    
+    result['programas'] = programas
+    
+    # Retrocompatibilidad: si solo tiene un programa, incluir campos legacy
+    if len(programas) == 1:
+        result['programa'] = programas[0]['programa']
+        result['tipo_participante'] = programas[0]['tipo']
+    elif len(programas) == 0:
+        result['programa'] = None
+        result['tipo_participante'] = None
+    else:
+        # Múltiples programas: no hay un único programa/tipo
+        result['programa'] = None
+        result['tipo_participante'] = None
+    
+    return result
 
 
 def get_participante_by_email(email: str) -> Optional[Dict[str, Any]]:
-    """Obtiene un participante por email, incluyendo su tipo/rol si existe."""
-    query = """
-        SELECT 
-            p.ci, 
-            p.nombre, 
-            p.apellido, 
-            p.email,
-                ppa.rol as tipo_participante,
-                ppa.nombre_programa as programa
-        FROM participante p
-        LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
-        WHERE p.email = %s
-        LIMIT 1
+    """Obtiene un participante por email, incluyendo TODOS sus programas y roles."""
+    # Primero obtener datos básicos del participante
+    query_participante = """
+        SELECT ci, nombre, apellido, email
+        FROM participante
+        WHERE email = %s
     """
-    rows = execute_query(query, (email,), role='readonly')
-    if rows:
-        result = rows[0].copy()
-        # Normalizar el valor para el frontend
-        if result.get('tipo_participante'):
-            tipo = result['tipo_participante']
-            if tipo == 'alumno':
-                result['tipo_participante'] = 'Estudiante'
-            elif tipo == 'postgrado':
-                result['tipo_participante'] = 'Postgrado'
-            elif tipo == 'docente':
-                result['tipo_participante'] = 'Docente'
+    rows = execute_query(query_participante, (email,), role='readonly')
+    if not rows:
+        return None
+    
+    result = rows[0].copy()
+    ci = result['ci']
+    
+    # Luego obtener TODOS sus programas y roles
+    query_programas = """
+        SELECT nombre_programa, rol
+        FROM participante_programa_academico
+        WHERE ci_participante = %s
+        ORDER BY nombre_programa, rol
+    """
+    programas_rows = execute_query(query_programas, (ci,), role='readonly')
+    
+    # Construir array de programas con roles normalizados
+    programas = []
+    for row in programas_rows:
+        rol_db = row.get('rol')
+        # Normalizar rol para el frontend
+        if rol_db == 'alumno':
+            rol_display = 'Estudiante'
+        elif rol_db == 'postgrado':
+            rol_display = 'Postgrado'
+        elif rol_db == 'docente':
+            rol_display = 'Docente'
         else:
-            result['tipo_participante'] = None
-
-        result['programa'] = result.get('programa') if result.get('programa') else None
-        return result
-    return None
+            rol_display = rol_db
+        
+        programas.append({
+            'programa': row.get('nombre_programa'),
+            'tipo': rol_display
+        })
+    
+    result['programas'] = programas
+    
+    # Retrocompatibilidad: si solo tiene un programa, incluir campos legacy
+    if len(programas) == 1:
+        result['programa'] = programas[0]['programa']
+        result['tipo_participante'] = programas[0]['tipo']
+    elif len(programas) == 0:
+        result['programa'] = None
+        result['tipo_participante'] = None
+    else:
+        # Múltiples programas: no hay un único programa/tipo
+        result['programa'] = None
+        result['tipo_participante'] = None
+    
+    return result
 
 
 def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Lista todos los participantes con paginación opcional, incluyendo su tipo/rol."""
-    query = """
-        SELECT 
-            p.ci, 
-            p.nombre, 
-            p.apellido, 
-            p.email,
-                ppa.rol as tipo_participante,
-                ppa.nombre_programa as programa
-        FROM participante p
-        LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
+    """Lista todos los participantes con paginación opcional, incluyendo TODOS sus programas y roles."""
+    # Primero obtener todos los participantes
+    query_participantes = """
+        SELECT ci, nombre, apellido, email
+        FROM participante
     """
     params = []
     
     if limit is not None:
-        query += " LIMIT %s"
+        query_participantes += " LIMIT %s"
         params.append(limit)
         if offset is not None:
-            query += " OFFSET %s"
+            query_participantes += " OFFSET %s"
             params.append(offset)
     
-    rows = execute_query(query, tuple(params) if params else None, role='readonly')
+    rows = execute_query(query_participantes, tuple(params) if params else None, role='readonly')
     
-    # Normalizar los valores para el frontend
+    if not rows:
+        return []
+    
+    # Obtener todos los programas de una vez (más eficiente)
+    cis = [row['ci'] for row in rows]
+    placeholders = ','.join(['%s'] * len(cis))
+    query_programas = f"""
+        SELECT ci_participante, nombre_programa, rol
+        FROM participante_programa_academico
+        WHERE ci_participante IN ({placeholders})
+        ORDER BY ci_participante, nombre_programa, rol
+    """
+    programas_rows = execute_query(query_programas, tuple(cis), role='readonly')
+    
+    # Agrupar programas por CI
+    programas_por_ci = {}
+    for row in programas_rows:
+        ci = row['ci_participante']
+        if ci not in programas_por_ci:
+            programas_por_ci[ci] = []
+        
+        rol_db = row.get('rol')
+        if rol_db == 'alumno':
+            rol_display = 'Estudiante'
+        elif rol_db == 'postgrado':
+            rol_display = 'Postgrado'
+        elif rol_db == 'docente':
+            rol_display = 'Docente'
+        else:
+            rol_display = rol_db
+        
+        programas_por_ci[ci].append({
+            'programa': row.get('nombre_programa'),
+            'tipo': rol_display
+        })
+    
+    # Construir resultado final
     result = []
     for row in rows:
         item = row.copy()
-        if item.get('tipo_participante'):
-            tipo = item['tipo_participante']
-            if tipo == 'alumno':
-                item['tipo_participante'] = 'Estudiante'
-            elif tipo == 'postgrado':
-                item['tipo_participante'] = 'Postgrado'
-            elif tipo == 'docente':
-                item['tipo_participante'] = 'Docente'
+        ci = item['ci']
+        programas = programas_por_ci.get(ci, [])
+        item['programas'] = programas
+        
+        # Retrocompatibilidad: si solo tiene un programa, incluir campos legacy
+        if len(programas) == 1:
+            item['programa'] = programas[0]['programa']
+            item['tipo_participante'] = programas[0]['tipo']
         else:
+            item['programa'] = None
             item['tipo_participante'] = None
-
-        # Normalizar programa
-        item['programa'] = item.get('programa') if item.get('programa') else None
+        
         result.append(item)
     
     return result
@@ -467,12 +541,13 @@ def get_participante_sanciones(ci: int) -> List[Dict[str, Any]]:
 
 
 def add_program_to_participante(ci: int, nombre_programa: str, rol: str) -> int:
-    """Asocia un participante a un programa académico con un rol ('alumno'|'docente').
+    """Asocia un participante a un programa académico con un rol ('alumno'|'docente'|'postgrado').
 
     Reglas:
     - Valida que el programa existe en `programa_academico`.
-    - Valida que `rol` sea 'alumno' o 'docente'.
-    - Usa INSERT ... ON DUPLICATE KEY UPDATE para permitir re-asignar el programa/rol si ya existe.
+    - Valida que `rol` sea 'alumno', 'docente' o 'postgrado'.
+    - La nueva PK es (ci_participante, nombre_programa, rol), permitiendo múltiples combinaciones.
+    - Si la combinación ya existe, NO hace nada (INSERT IGNORE).
     """
     if not nombre_programa or not nombre_programa.strip():
         raise ValueError("nombre_programa es requerido para asociar un programa")
@@ -490,9 +565,9 @@ def add_program_to_participante(ci: int, nombre_programa: str, rol: str) -> int:
     if not exists:
         raise ValueError(f"Programa académico no encontrado: {nombre_programa}")
 
-    # Insertar o actualizar la asociación. La columna ci_participante es UNIQUE por diseño.
+    # Insertar la asociación. Si ya existe la combinación (ci, programa, rol), no hace nada.
     query = (
-        "INSERT INTO participante_programa_academico (ci_participante, nombre_programa, rol) "
-        "VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE nombre_programa = VALUES(nombre_programa), rol = VALUES(rol)"
+        "INSERT IGNORE INTO participante_programa_academico (ci_participante, nombre_programa, rol) "
+        "VALUES (%s, %s, %s)"
     )
     return execute_non_query(query, (ci, nombre_programa, rol_norm), role='user')

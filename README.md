@@ -134,14 +134,38 @@ El sistema incluye un **cronjob automático** que procesa sanciones diariamente.
 **Verificar que funciona:**
 
 ```bash
-# Ver logs del procesamiento de sanciones
+# 1. Ver logs del procesamiento de sanciones
 docker exec flask_app cat /var/log/sanciones.log
 
-# Ejecutar manualmente para pruebas (procesa reservas de ayer)
+# 2. Verificar que cron está corriendo
+docker exec flask_app ls -la /var/run/crond.pid
+
+# 3. Ejecutar manualmente para pruebas (procesa reservas de ayer)
 docker exec flask_app python3 /app/scripts/procesar_sanciones_diarias.py
 ```
 
-**Nota:** El cronjob usa la hora del contenedor Docker. Si necesitas ajustar el horario, edita el archivo `Dockerfile` y reconstruye la imagen.
+**⚠️ Importante: Si cron no está corriendo**
+
+Si el contenedor se reinició y cron no se inició automáticamente, ejecuta:
+
+```bash
+# Opción 1: Reiniciar el contenedor (recomendado)
+docker-compose restart app
+
+# Opción 2: Iniciar cron manualmente (temporal)
+docker exec flask_app /usr/sbin/cron
+```
+
+**Verificar que cron se inició correctamente:**
+
+```bash
+# Debe mostrar el archivo crond.pid
+docker exec flask_app ls -la /var/run/crond.pid
+
+# Si NO aparece el archivo, cron no está corriendo
+```
+
+**Nota:** El cronjob usa la hora del contenedor Docker (UTC). Si necesitas ajustar el horario, edita el archivo `Dockerfile` línea 26 y reconstruye la imagen.
 
 #### Paso 7: Ver logs (opcional)
 

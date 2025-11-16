@@ -23,9 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Configurar cronjob para procesar sanciones diariamente a las 8:00 AM
-RUN echo "0 8 * * * cd /app && /usr/local/bin/python3 /app/scripts/procesar_sanciones_diarias.py >> /var/log/sanciones.log 2>&1" > /etc/cron.d/sanciones-cron \
+RUN echo "0 8 * * * root cd /app && /usr/local/bin/python3 /app/scripts/procesar_sanciones_diarias.py >> /var/log/sanciones.log 2>&1" > /etc/cron.d/sanciones-cron \
 	&& chmod 0644 /etc/cron.d/sanciones-cron \
-	&& crontab /etc/cron.d/sanciones-cron \
 	&& touch /var/log/sanciones.log
 
 # Exponemos el puerto que usa Flask
