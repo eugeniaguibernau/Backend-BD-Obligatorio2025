@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Script para procesar sanciones automáticas diariamente.
 Se ejecuta vía cronjob y busca reservas del día anterior sin asistencia.

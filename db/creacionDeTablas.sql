@@ -22,7 +22,7 @@ CREATE TABLE admin (
 
 CREATE TABLE login (
                                 correo VARCHAR(30),
-                                `contraseña` VARCHAR(60) NOT NULL,
+                                `contrasena` VARCHAR(60) NOT NULL,
                                 PRIMARY KEY (correo),
                                 FOREIGN KEY (correo) references participante(email)
 );

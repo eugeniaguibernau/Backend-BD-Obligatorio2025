@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   db:
@@ -9,12 +9,14 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: proyecto
-      MYSQL_USER: root
-      MYSQL_PASSWORD: rootpassword
     ports:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./db/creacionDeTablas.sql:/docker-entrypoint-initdb.d/001_creacionDeTablas.sql
+      - ./db/SEED_FINAL_DATOS.sql:/docker-entrypoint-initdb.d/002_SEED_FINAL_DATOS.sql
+      - ./db/create_mysql_users.sql:/docker-entrypoint-initdb.d/003_create_mysql_users.sql
+      - ./db/arreglo_turnos.sql:/docker-entrypoint-initdb.d/004_arreglo_turnos.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
       interval: 10s

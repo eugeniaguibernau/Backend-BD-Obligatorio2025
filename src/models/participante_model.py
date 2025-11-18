@@ -3,11 +3,8 @@ from src.config.database import execute_query, execute_non_query, get_connection
 import pymysql
 import re
 
-
-# Regex para validar formato de email
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
-# Límites de longitud según esquema SQL
 MAX_NOMBRE_LENGTH = 20
 MAX_APELLIDO_LENGTH = 20
 MAX_EMAIL_LENGTH = 30

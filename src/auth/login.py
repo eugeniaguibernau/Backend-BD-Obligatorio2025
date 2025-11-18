@@ -10,7 +10,6 @@ def hash_password(plain_password: str) -> str:
 	"""
 	if plain_password is None:
 		raise ValueError("La contraseña no puede ser nula")
-	# rounds/cost: 12 es un valor razonable; ajústalo si tu servidor es muy lento/rápido
 	hashed = bcrypt.hashpw(plain_password.encode('utf-8'), bcrypt.gensalt(rounds=12))
 	return hashed.decode('utf-8')
 
@@ -23,7 +22,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 	if plain_password is None or hashed_password is None:
 		return False
 	try:
-		# bcrypt hashes son bytes; usamos encoding utf-8
 		return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 	except Exception:
 		return False
@@ -41,7 +39,7 @@ def authenticate_user(correo: str, plain_password: str):
 
 	conn = get_connection('readonly')
 	cur = conn.cursor()
-	cur.execute("SELECT correo, contraseña FROM login WHERE correo = %s", (correo,))
+	cur.execute("SELECT correo, contrasena FROM login WHERE correo = %s", (correo,))
 	row = cur.fetchone()
 
 	if not row:
@@ -50,7 +48,7 @@ def authenticate_user(correo: str, plain_password: str):
 		print(f"[DEBUG] Usuario no encontrado: {correo}")
 		return False, "Usuario no encontrado"
 
-	hashed = row.get('contraseña') if isinstance(row, dict) else row[1]
+	hashed = row.get('contrasena') if isinstance(row, dict) else row[1]
 	print(f"[DEBUG] Email: {correo}")
 	print(f"[DEBUG] Hash from DB: {hashed[:20] if hashed else 'NULL'}...")
 	print(f"[DEBUG] Plain password: {plain_password}")
