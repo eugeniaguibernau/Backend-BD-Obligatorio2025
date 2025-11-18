@@ -45,11 +45,11 @@ def validar_reglas_negocio(datos):
     # aceptar timedelta(1 hour) o strings '01:00:00'/'1:00:00'
     from datetime import timedelta
     if hasattr(duracion, 'total_seconds'):
-        if duracion != timedelta(hours=2):
-            return False, "Solo se permiten turnos de 2 horas."
+        if duracion != timedelta(hours=1):
+            return False, "Solo se permiten turnos de 1 horado."
     else:
         ds = str(duracion)
-        if ds not in ('2:00:00', '2:00:00'):
+        if ds not in ('1:00:00', '1:00:00'):
             return False, "Solo se permiten turnos de 2 hora."
     hi = turno.get('hora_inicio') if isinstance(turno, dict) else turno[0]
     hf = turno.get('hora_fin') if isinstance(turno, dict) else turno[1]
