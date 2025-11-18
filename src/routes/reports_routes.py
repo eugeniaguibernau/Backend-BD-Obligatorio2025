@@ -63,7 +63,6 @@ def most_reserved_rooms():
             'total': len(results)
         })), 200
     except Exception as e:
-        # Log full traceback for debugging
         try:
             current_app.logger.exception(e)
         except Exception:
@@ -629,12 +628,8 @@ def peak_hours_by_room():
                     'nombre_sala': row['nombre_sala'],
                     'edificio': row['edificio'],
                     'tipo_sala': row['tipo_sala'],
-                    # include departamento/unidad information from edificio table so frontend
-                    # can find a faculty-like property (many frontends look for departamento/unidad)
                     'departamento': row.get('departamento'),
                     'unidad': row.get('departamento'),
-                    # the domain model doesn't attach a "facultad" to a sala directly; provide
-                    # placeholder keys so UI checks for multiple possible names succeed.
                     'facultad': None,
                     'facultad_nombre': None,
                     'faculty': None,
@@ -642,7 +637,6 @@ def peak_hours_by_room():
                     'turnos': []
                 }
             
-            # build both a raw structured object and a human-readable label
             horario_inicio = str(row['hora_inicio'])
             horario_fin = str(row['hora_fin'])
             total_res = row['total_reservas']
@@ -665,21 +659,18 @@ def peak_hours_by_room():
                 # normalize hora strings to HH:MM
                 raw_hi = t.get('horario_inicio') or t.get('hora_inicio') or ''
                 raw_hf = t.get('horario_fin') or t.get('hora_fin') or ''
-                # try to extract time portion (handles 'YYYY-MM-DD HH:MM:SS' or 'HH:MM:SS')
                 def time_short(s):
                     s = str(s)
                     if ' ' in s:
                         part = s.split(' ')[-1]
                     else:
                         part = s
-                    # take HH:MM
                     return part[:5] if len(part) >= 5 else part
 
                 hi = time_short(raw_hi)
                 hf = time_short(raw_hf)
                 cnt = t.get('total_reservas', 0)
                 dias = t.get('dias_diferentes', 0)
-                # cleaner label: "08:00–10:00 — 12 reservas (5 días)"
                 label = f"{hi}–{hf} — {cnt} reservas ({dias} días)"
                 turnos_display.append(label)
 
@@ -717,7 +708,6 @@ def occupancy_by_room_type():
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     
-    # Query para contar reservas por tipo de sala
     query_reservas = """
         SELECT 
             s.tipo_sala, COUNT(r.id_reserva) as total_reservas, COUNT(DISTINCT r.fecha) as dias_con_reservas,
