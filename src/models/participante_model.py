@@ -229,7 +229,7 @@ def list_participantes(limit: Optional[int] = None, offset: Optional[int] = None
     if not rows:
         return []
     
-    # Obtener todos los programas de una vez (más eficiente)
+    # Obtener todos los programas de una vez
     cis = [row['ci'] for row in rows]
     placeholders = ','.join(['%s'] * len(cis))
     query_programas = f"""
@@ -323,7 +323,6 @@ def update_participante(ci: int, nombre: Optional[str] = None,
         params.append(email)
     
     if not sets:
-        # No updates to participante table, but maybe program/rol needs update
         participant_updates = 0
     else:
         participant_updates = None
@@ -336,10 +335,8 @@ def update_participante(ci: int, nombre: Optional[str] = None,
         if query:
             total_affected += execute_non_query(query, tuple(params), role='user')
 
-        # Handle programa_academico / tipo_participante updates in participante_programa_academico
         program_ops = 0
         if tipo_participante is not None or programa_academico is not None:
-            # Normalize role if provided
             role_db = None
             if tipo_participante is not None:
                 t = tipo_participante.lower()
@@ -366,7 +363,6 @@ def update_participante(ci: int, nombre: Optional[str] = None,
                 new_program = programa_academico if programa_academico is not None else existing_row.get('nombre_programa')
                 new_role = role_db if role_db is not None else existing_row.get('rol')
 
-                # Validate program exists
                 if new_program is None:
                     raise ValueError("programa_academico no encontrado y no se proveyó uno nuevo")
 
@@ -378,11 +374,9 @@ def update_participante(ci: int, nombre: Optional[str] = None,
                 if not exists_program:
                     raise ValueError(f"Programa académico no encontrado: {new_program}")
 
-                # Update association
                 query_up = "UPDATE participante_programa_academico SET nombre_programa = %s, rol = %s WHERE ci_participante = %s"
                 program_ops = execute_non_query(query_up, (new_program, new_role, ci), role='user')
             else:
-                # No existing association: require both program and tipo
                 if not programa_academico or not role_db:
                     raise ValueError("Para asociar un programa se requieren 'programa_academico' y 'tipo_participante'.")
                 program_ops = add_program_to_participante(ci, programa_academico, role_db)

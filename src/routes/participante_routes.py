@@ -175,11 +175,9 @@ def update_participante_route(ci: int):
         if not existing:
             return jsonify({'error': 'participante not found'}), 404
 
-        # Compatibility: accept either 'tipo_participante' (canonical) or 'tipo' (label)
         provided_canonical = data.get('tipo_participante') if 'tipo_participante' in data else None
         provided_label = data.get('tipo') if 'tipo' in data else None
 
-        # Helper to derive canonical from a label (e.g. 'Postgrado' -> 'postgrado')
         def canonical_from_label(label: str):
             if not label:
                 return None
@@ -192,7 +190,6 @@ def update_participante_route(ci: int):
                 return 'docente'
             return l
 
-        # If both provided, validate they match (avoid silent mismatches from frontend)
         if provided_canonical is not None and provided_label is not None:
             canon_norm = str(provided_canonical).strip().lower()
             canon_from_label = canonical_from_label(provided_label)
@@ -202,9 +199,7 @@ def update_participante_route(ci: int):
                                 'tipo': provided_label,
                                 'detalle': f"tipo_participante '{provided_canonical}' no coincide con tipo '{provided_label}' (esperado canonical '{canon_from_label}')"}), 400
 
-        # Decide which raw value to use for normalization: prefer canonical if present
         raw_tipo = provided_canonical if provided_canonical is not None else provided_label
-        # Compatibility for programa name
         programa = data.get('programa_academico') if 'programa_academico' in data else data.get('programa')
 
         tipo_canonical = None
@@ -235,7 +230,6 @@ def update_participante_route(ci: int):
         if affected == 0:
             return jsonify({'message': 'no changes made', 'updated': 0}), 200
 
-        # Return the updated participante for frontend convenience
         updated = get_participante_by_ci(ci)
         return jsonify({'updated': affected, 'participante': updated}), 200
     except ValueError as e:

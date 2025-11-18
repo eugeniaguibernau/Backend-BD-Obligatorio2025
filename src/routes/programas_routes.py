@@ -19,7 +19,6 @@ def list_programas():
     query = "SELECT nombre_programa, id_facultad, tipo FROM programa_academico ORDER BY nombre_programa"
     rows = execute_query(query, role='readonly')
 
-    # Deduplicate by exact nombre_programa and add value/label for frontend compatibility.
     seen = set()
     programas = []
     for r in rows:

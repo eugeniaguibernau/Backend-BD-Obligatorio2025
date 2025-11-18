@@ -56,7 +56,6 @@ def jwt_required(fn):
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        # Allow preflight OPTIONS requests to pass through without JWT validation
         if request.method == 'OPTIONS':
             # Devuelve la respuesta OPTIONS por defecto de Flask para que
             # la extensión Flask-CORS pueda añadir los headers CORS correctamente.
@@ -69,7 +68,6 @@ def jwt_required(fn):
         token = auth.split(' ', 1)[1].strip()
         ok, payload_or_err = verify_token(token)
         if not ok:
-            # Token expired -> 401 with clear message so frontend can logout
             if payload_or_err == 'expired':
                 return jsonify({'ok': False, 'error': 'Token expired'}), 401
             return jsonify({'ok': False, 'mensaje': 'Token inválido', 'detalle': payload_or_err}), 401

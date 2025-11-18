@@ -81,7 +81,6 @@ def _compute_estado_actual(reserva):
     )
     cnt_true = resultado_true[0]['c'] if resultado_true else 0
     if cnt_true and cnt_true > 0:
-        # Use 'asistida' as the canonical state when there was attendance
         return 'asistida'
 
     # Ninguno asistió/registrado
