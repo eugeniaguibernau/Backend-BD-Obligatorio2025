@@ -9,7 +9,7 @@ Backend del sistema de gestión de reservas de salas universitarias desarrollado
 
 ---
 
-## 📋 Tabla de Contenidos
+## Tabla de Contenidos
 
 - [Instalación Rápida](#-instalación-rápida-docker)
 - [Estructura del Proyecto](#-estructura-del-proyecto)
