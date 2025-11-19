@@ -14,4 +14,4 @@ VALUES ('14:00:00', '15:00:00'),('15:00:00', '16:00:00'),('16:00:00', '17:00:00'
 
 INSERT INTO participante (email, nombre, apellido, ci) VALUES ('ana.admin@ucu.edu.uy',   'admin', 'ANA',   12345668), ('pedro.admin@ucu.edu.uy', 'admin', 'PEDRO', 23456789), ('laura.admin@ucu.edu.uy', 'admin', 'LAURA', 34567890); 
 
-INSERT INTO login (correo,contrasena) VALUES ('ana.admin@ucu.edu.uy',   'admin'), ('pedro.admin@ucu.edu.uy', 'admin'), ('laura.admin@ucu.edu.uy', 'admin');
+INSERT INTO login (correo,contrasena) VALUES ('ana.admin@ucu.edu.uy',   'admin2025'), ('pedro.admin@ucu.edu.uy', 'admin2025'), ('laura.admin@ucu.edu.uy', 'admin2025');
