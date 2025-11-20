@@ -19,6 +19,11 @@ sala_bp = Blueprint('sala_bp', __name__)
 @require_admin  # Solo admins pueden crear salas
 def create_sala_route():
     data = request.get_json() or {}
+
+    for key in ['nombre_sala', 'edificio', 'tipo_sala']:
+        if key in data and isinstance(data[key], str):
+            data[key] = data[key].strip()
+            
     required = ['nombre_sala', 'edificio', 'capacidad', 'tipo_sala']
     for f in required:
         if f not in data:
