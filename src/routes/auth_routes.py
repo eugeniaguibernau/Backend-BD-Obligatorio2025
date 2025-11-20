@@ -97,9 +97,9 @@ def register():
         hashed = hash_password(plain)
         cur.execute("SELECT correo FROM login WHERE correo = %s", (correo,))
         if cur.fetchone():
-            cur.execute("UPDATE login SET `contraseña` = %s WHERE correo = %s", (hashed, correo))
+            cur.execute("UPDATE login SET `contrasena` = %s WHERE correo = %s", (hashed, correo))
         else:
-            cur.execute("INSERT INTO login (correo, `contraseña`) VALUES (%s, %s)", (correo, hashed))
+            cur.execute("INSERT INTO login (correo, `contrasena`) VALUES (%s, %s)", (correo, hashed))
 
         conn.commit()
     except pymysql.err.IntegrityError as e:
