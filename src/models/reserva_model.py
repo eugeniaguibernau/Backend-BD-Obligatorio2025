@@ -89,9 +89,28 @@ def validar_reglas_negocio(datos):
         if not programa:
             return False, f"El participante {ci} no tiene programa académico asignado."
 
-        if tipo_sala == 'docente' and programa['rol'] != 'docente':
+        # DEBUG: mostrar valores obtenidos de la BD para diagnosticar casos
+        # donde el participante parece no ser posgrado/docente aunque el seed lo indique.
+        try:
+            print(f"[VALIDAR] ci={ci} tipo_sala={tipo_sala} programa_row={programa}")
+        except Exception:
+            pass
+
+        # Normalizar valores y aceptar variantes de escritura.
+        rol_part = (programa.get('rol') or '').lower()
+        tipo_prog = (programa.get('tipo') or '').lower()
+
+        # La sala docente requiere que el participante tenga rol 'docente'
+        if tipo_sala == 'docente' and rol_part != 'docente':
             return False, f"La sala {nombre_sala} es exclusiva de docentes."
-        if tipo_sala == 'posgrado' and programa['tipo'] != 'posgrado':
+
+        # La sala posgrado acepta participantes cuyo rol o tipo de programa
+        # indiquen posgrado. En el código histórico se usan ambas variantes
+        # 'postgrado' y 'posgrado' en distintos lugares, así que las
+        # consideramos equivalentes aquí.
+        if tipo_sala == 'posgrado' and not (
+            rol_part in ('postgrado', 'posgrado') or tipo_prog in ('postgrado', 'posgrado')
+        ):
             return False, f"La sala {nombre_sala} es exclusiva de posgrado."
 
     # Reglas globales para participantes: máximo 2 horas/día y 3 reservas activas/semana

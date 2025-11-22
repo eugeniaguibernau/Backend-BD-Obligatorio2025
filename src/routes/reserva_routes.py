@@ -150,6 +150,38 @@ def crear_reserva_ruta():
         if not turnos_a_reservar:
             return jsonify({'error': 'No se especificaron turnos válidos'}), 400
 
+        # Validación adicional: si la reserva es para HOY no permitimos crear
+        # una reserva para un turno que ya finalizó (hora_fin <= ahora).
+        # Esto evita que el cliente cree reservas para horarios ya pasados del mismo día.
+        try:
+            hoy = datetime.now().date()
+            ahora = datetime.now()
+            if fecha_reserva == hoy:
+                for id_turno in turnos_a_reservar:
+                    resultado_turno = execute_query(
+                        "SELECT TIME(hora_fin) as hora_fin FROM turno WHERE id_turno = %s",
+                        (id_turno,),
+                        role='readonly'
+                    )
+                    if not resultado_turno or not resultado_turno[0].get('hora_fin'):
+                        # si no tenemos info del turno no bloqueamos aquí, dejamos validar_reglas_negocio
+                        continue
+                    hf = resultado_turno[0].get('hora_fin')
+                    # hf puede ser datetime.time o string 'HH:MM:SS'
+                    hf_s = str(hf)
+                    if len(hf_s.split(':')) == 2:
+                        hf_s = hf_s + ':00'
+                    try:
+                        fin_dt = datetime.strptime(f"{fecha_reserva} {hf_s}", '%Y-%m-%d %H:%M:%S')
+                        if ahora >= fin_dt:
+                            return jsonify({'error': f'No se puede reservar: el turno {id_turno} ya finalizó en la fecha seleccionada.'}), 400
+                    except Exception:
+                        # si parse falla, no bloquear aquí
+                        pass
+        except Exception:
+            # en caso de cualquier fallo de esta comprobación seguimos con el flujo normal
+            pass
+
         # Validar todas las reservas ANTES de crear cualquiera
         for id_turno in turnos_a_reservar:
             datos_validacion = {
