@@ -479,13 +479,27 @@ def get_participante_with_programs(ci: int) -> Optional[Dict[str, Any]]:
     query = """
     SELECT 
         p.ci, p.nombre, p.apellido, p.email,
-        ppa.nombre_programa, ppa.rol, ppa.id_alumno_programa
+        ppa.nombre_programa, ppa.rol
     FROM participante p
     LEFT JOIN participante_programa_academico ppa ON p.ci = ppa.ci_participante
     WHERE p.ci = %s
     """
-    rows = execute_query(query, (ci,), role='readonly')
-    
+    try:
+        rows = execute_query(query, (ci,), role='readonly')
+    except Exception as e:
+        # Log and re-raise so the caller gets the exception (route will return 500)
+        try:
+            print(f"[DEBUG participante] error ejecutando query get_participante_with_programs ci={ci}: {e}")
+        except Exception:
+            pass
+        raise
+
+    # Debug: mostrar lo que devuelve la BD para diagnosticar 500s
+    try:
+        print(f"[DEBUG participante] get_participante_with_programs ci={ci} rows_count={len(rows) if rows is not None else 0} rows_sample={rows[:3]}")
+    except Exception:
+        pass
+
     if not rows:
         return None
     
@@ -511,7 +525,6 @@ def get_participante_with_programs(ci: int) -> Optional[Dict[str, Any]]:
                     participante['tipo_participante'] = 'Docente'
             
             participante['programas'].append({
-                'id_alumno_programa': row['id_alumno_programa'],
                 'nombre_programa': row['nombre_programa'],
                 'rol': 'Estudiante' if row['rol'] == 'alumno' else 'Postgrado' if row['rol'] == 'postgrado' else 'Docente' if row['rol'] == 'docente' else row['rol']
             })
