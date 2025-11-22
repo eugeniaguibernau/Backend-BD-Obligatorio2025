@@ -37,51 +37,70 @@ def _parse_date(s: str):
     raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD, MM-DD-YYYY o MM/DD/YYYY.")
 
 
-@sancion_bp.route('/<int:id_sancion>', methods=['PUT'])
+@sancion_bp.route('/<int:id_sancion>', methods=['PATCH'])
 @jwt_required
 @require_admin
 def actualizar_sancion_ruta(id_sancion: int):
     """
-    PUT /sanciones/:id
-    Body: { "fecha_inicio": "YYYY-MM-DD", "fecha_fin": "YYYY-MM-DD" }
+    PATCH /sanciones/:id
+    Body (campos opcionales): 
+    {
+        "fecha_inicio": "YYYY-MM-DD",  // opcional
+        "fecha_fin": "YYYY-MM-DD"      // opcional
+    }
+    
     Reglas de validación:
-      - fecha_inicio >= hoy (UTC)
-      - fecha_fin > hoy (UTC)
-      - fecha_fin > fecha_inicio
+      - Al menos uno de los dos campos debe estar presente
+      - Si se envía fecha_fin, no puede ser anterior a fecha_inicio (actual o nueva)
+      - Si se envía fecha_fin, debe ser >= hoy (para que tenga sentido)
+      - Si se envía fecha_inicio y es nueva, no validamos que sea >= hoy (permite extender sanciones pasadas)
+    
     Ejecuta SELECT ... FOR UPDATE y UPDATE dentro de transacción.
     """
     datos = request.get_json() or {}
-    for campo in ['fecha_inicio', 'fecha_fin']:
-        if campo not in datos:
-            return jsonify({'ok': False, 'error': f'Falta el campo obligatorio: {campo}'}), 400
+    
+    # Validar que al menos un campo esté presente
+    if 'fecha_inicio' not in datos and 'fecha_fin' not in datos:
+        return jsonify({'ok': False, 'error': 'Debe proporcionar al menos fecha_inicio o fecha_fin'}), 400
 
     try:
-        fi = _parse_date(datos['fecha_inicio'])
-        ff = _parse_date(datos['fecha_fin'])
-
         # Normalizar hoy en UTC (solo fecha)
         hoy_utc = datetime.utcnow().date()
-
-        # Validaciones
-        if fi < hoy_utc:
-            return jsonify({'ok': False, 'error': 'La fecha inicio debe ser hoy o posterior'}), 400
-        if ff <= hoy_utc:
-            return jsonify({'ok': False, 'error': 'La fecha fin debe ser posterior a hoy'}), 400
-        if ff <= fi:
-            return jsonify({'ok': False, 'error': 'La fecha fin debe ser posterior a la fecha de inicio'}), 400
 
         # Ejecutar en transacción con SELECT ... FOR UPDATE
         conn = get_connection(role='admin')
         try:
             cur = conn.cursor()
             cur.execute('START TRANSACTION')
-            cur.execute('SELECT * FROM sancion_participante WHERE id_sancion = %s FOR UPDATE', (id_sancion,))
+            cur.execute('SELECT ci_participante, fecha_inicio, fecha_fin FROM sancion_participante WHERE id_sancion = %s FOR UPDATE', (id_sancion,))
             fila = cur.fetchone()
             if not fila:
                 conn.rollback()
                 cur.close()
                 conn.close()
                 return jsonify({'ok': False, 'error': 'Sanción no encontrada'}), 404
+
+            # Obtener valores actuales
+            fi_actual = fila.get('fecha_inicio')
+            ff_actual = fila.get('fecha_fin')
+
+            # Determinar valores finales (actual o nuevo)
+            fi = _parse_date(datos['fecha_inicio']) if 'fecha_inicio' in datos else fi_actual
+            ff = _parse_date(datos['fecha_fin']) if 'fecha_fin' in datos else ff_actual
+
+            # Validaciones
+            if ff <= fi:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                return jsonify({'ok': False, 'error': 'La fecha fin debe ser posterior a la fecha de inicio'}), 400
+            
+            # Validar que fecha_fin tenga sentido (no en el pasado lejano)
+            if ff < hoy_utc:
+                conn.rollback()
+                cur.close()
+                conn.close()
+                return jsonify({'ok': False, 'error': 'La fecha fin debe ser hoy o posterior (no tiene sentido extender una sanción ya vencida)'}), 400
 
             # Realizar update
             cur.execute(
