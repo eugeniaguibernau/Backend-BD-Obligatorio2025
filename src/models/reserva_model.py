@@ -175,14 +175,17 @@ def validar_reglas_negocio(datos):
 
             # Daily (2 hours) check: for each date in requested_per_date, count existing hours + requested on that date
             for date_str, req_cnt_on_date in requested_per_date.items():
+                # Contar sólo horas en salas libres (excluir 'docente' y 'posgrado/postgrado')
                 cursor.execute("""
                     SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, t.hora_inicio, t.hora_fin)),0) AS horas_reservadas
                     FROM reserva_participante rp
                     JOIN reserva r ON rp.id_reserva = r.id_reserva
                     JOIN turno t ON r.id_turno = t.id_turno
+                    JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
                     WHERE rp.ci_participante = %s
                       AND r.fecha = %s
                       AND r.estado = 'activa'
+                      AND TRIM(LOWER(COALESCE(s.tipo_sala, ''))) NOT IN ('docente','posgrado','postgrado')
                 """, (ci, date_str))
                 horas_reservadas = cursor.fetchone()['horas_reservadas'] or 0
                 # requested hours on that date = req_cnt_on_date * 1 (each turno 1h)
@@ -190,24 +193,23 @@ def validar_reglas_negocio(datos):
                     cursor.close(); conexion.close()
                     return False, f"El participante {ci} excede el límite diario en {date_str} ({horas_reservadas} existentes + {req_cnt_on_date} solicitadas). Máximo permitido: 2 horas."
 
-            # Weekly check: for each week in requested_per_week, count existing turnos in DB + requested
             for wk_start, req_cnt in requested_per_week.items():
                 wk_start_date = datetime.strptime(wk_start, '%Y-%m-%d').date()
                 wk_end_date = wk_start_date + timedelta(days=6)
-                # Count existing turnos (cada fila en reserva_participante corresponde a un turno)
+
                 # Contar sólo reservas en salas libres: excluir salas con tipo 'docente' o 'posgrado/postgrado'
-                # Usamos COALESCE(LOWER(s.tipo_sala),'') para evitar problemas con NULL
                 cursor.execute("""
-                    SELECT COUNT(*) AS cantidad
+                    SELECT COUNT(DISTINCT r.id_reserva) AS cantidad
                     FROM reserva_participante rp
                     JOIN reserva r ON rp.id_reserva = r.id_reserva
                     JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
                     WHERE rp.ci_participante = %s
                       AND r.fecha BETWEEN %s AND %s
                       AND r.estado = 'activa'
-                      AND COALESCE(LOWER(s.tipo_sala), '') NOT IN ('docente','posgrado','postgrado')
+                      AND TRIM(LOWER(COALESCE(s.tipo_sala, ''))) NOT IN ('docente','posgrado','postgrado')
                 """, (ci, wk_start_date, wk_end_date))
                 existentes = cursor.fetchone()['cantidad'] or 0
+
                 total = existentes + req_cnt
                 if total > 3:
                     cursor.close(); conexion.close()
@@ -328,6 +330,24 @@ def crear_reservas_batch(nombre_sala, edificio, fecha, turnos, participantes):
         is_exempt = (eff == 'docente' and tipo_sala == 'docente') or (eff == 'postgrado' and tipo_sala == 'posgrado')
         if is_exempt:
             continue
+        try:
+            cur.execute("""
+                SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, t.hora_inicio, t.hora_fin)),0) AS horas_reservadas
+                FROM reserva_participante rp
+                JOIN reserva r ON rp.id_reserva = r.id_reserva
+                JOIN turno t ON r.id_turno = t.id_turno
+                JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
+                WHERE rp.ci_participante = %s
+                  AND r.fecha = %s
+                  AND r.estado = 'activa'
+                  AND TRIM(LOWER(COALESCE(s.tipo_sala, ''))) NOT IN ('docente','posgrado','postgrado')
+            """, (ci, fecha))
+            horas_existentes = cur.fetchone().get('horas_reservadas') or 0
+        except Exception:
+            horas_existentes = 0
+        if (horas_existentes + turnos_solicitados) > 2:
+            conn.close()
+            raise ValueError(f"El participante {ci} excede el límite diario en {fecha} ({horas_existentes} existentes + {turnos_solicitados} solicitadas). Máximo permitido: 2 horas.")
 
         cur.execute("""
             SELECT COUNT(DISTINCT r.id_reserva) AS cantidad
@@ -346,7 +366,7 @@ def crear_reservas_batch(nombre_sala, edificio, fecha, turnos, participantes):
             WHERE rp.ci_participante = %s
             AND r.fecha BETWEEN %s AND %s
             AND r.estado = 'activa'
-            AND COALESCE(LOWER(s.tipo_sala), '') NOT IN ('docente','posgrado','postgrado')
+            AND TRIM(LOWER(COALESCE(s.tipo_sala, ''))) NOT IN ('docente','posgrado','postgrado')
         """, (ci, inicio_semana, fin_semana))
         existentes = cur.fetchone()['cantidad']
         try:
