@@ -29,6 +29,136 @@ def _compute_estado_actual(reserva):
     - cualquier estado distinto almacenado se devuelve tal cual
     """
     # Si ya fue marcada cancelada, respetamos el valor almacenado
+
+    estado_guardado = (reserva.get('estado') or '').strip().lower()
+    if estado_guardado == 'cancelada':
+        return 'cancelada'
+
+    # Siempre intentar obtener hora_fin desde turno si falta
+    hora_fin = reserva.get('hora_fin')
+    if not hora_fin and 'turno' in reserva and reserva['turno'] and 'hora_fin' in reserva['turno']:
+        hora_fin = reserva['turno']['hora_fin']
+        reserva['hora_fin'] = hora_fin
+
+    # Si el estado guardado es distinto de 'activa' tenemos que tratar
+    # algunos casos especiales:
+    # - si está 'finalizada' y hay al menos 1 asistencia registrada, devolver 'asistida'
+    # - si está 'finalizada' y NO hubo asistencia, devolver 'sin asistencia' (para indicar sanción)
+    # - para otros estados no-activa, devolver tal cual
+    if estado_guardado and estado_guardado != 'activa':
+        if estado_guardado == 'finalizada':
+            # revisar asistencia para distinguir entre 'asistida' y 'sin asistencia'
+            try:
+                resultado_true = execute_query(
+                    "SELECT COUNT(*) as c FROM reserva_participante WHERE id_reserva=%s AND asistencia=1",
+                    (reserva.get('id_reserva'),),
+                    role='readonly'
+                )
+                cnt_true = resultado_true[0]['c'] if resultado_true else 0
+                if cnt_true and cnt_true > 0:
+                    return 'asistida'
+                # Si la reserva es de hoy y la hora_fin no ha pasado, debe seguir activa
+                fecha_res = reserva.get('fecha')
+                try:
+                    if isinstance(fecha_res, str):
+                        fecha_obj = datetime.strptime(fecha_res, '%Y-%m-%d').date()
+                    elif isinstance(fecha_res, date):
+                        fecha_obj = fecha_res
+                    else:
+                        fecha_obj = date.fromisoformat(str(fecha_res))
+                except Exception:
+                    return 'sin asistencia'
+                hoy = datetime.now().date()
+                ahora = datetime.now()
+                if fecha_obj == hoy and hora_fin:
+                    hf = hora_fin
+                    if isinstance(hf, str) and len(hf.split(':')) == 2:
+                        hf = hf + ':00'
+                    try:
+                        hora_fin_dt = datetime.combine(hoy, datetime.strptime(hf, '%H:%M:%S').time())
+                        if ahora < hora_fin_dt:
+                            return 'activa'
+                    except Exception:
+                        pass
+                return 'sin asistencia'
+            except Exception:
+                return estado_guardado
+        # Si la reserva es de hoy y la hora_fin no ha pasado, debe seguir activa
+        fecha_res = reserva.get('fecha')
+        try:
+            if isinstance(fecha_res, str):
+                fecha_obj = datetime.strptime(fecha_res, '%Y-%m-%d').date()
+            elif isinstance(fecha_res, date):
+                fecha_obj = fecha_res
+            else:
+                fecha_obj = date.fromisoformat(str(fecha_res))
+        except Exception:
+            return estado_guardado
+        hoy = datetime.now().date()
+        ahora = datetime.now()
+        if fecha_obj == hoy and hora_fin:
+            hf = hora_fin
+            if isinstance(hf, str) and len(hf.split(':')) == 2:
+                hf = hf + ':00'
+            try:
+                hora_fin_dt = datetime.combine(hoy, datetime.strptime(hf, '%H:%M:%S').time())
+                if ahora < hora_fin_dt:
+                    return 'activa'
+            except Exception:
+                pass
+        return estado_guardado
+
+    # Solo calculamos para reservas que en DB están como 'activa' (o sin estado)
+    fecha_res = reserva.get('fecha')
+    try:
+        if isinstance(fecha_res, str):
+            fecha_obj = datetime.strptime(fecha_res, '%Y-%m-%d').date()
+        elif isinstance(fecha_res, date):
+            fecha_obj = fecha_res
+        else:
+            # si es otro tipo, intentar convertir directamente
+            fecha_obj = date.fromisoformat(str(fecha_res))
+    except Exception:
+        # En caso de error, retornamos el estado guardado
+        return estado_guardado or 'activa'
+
+    hoy = datetime.now().date()
+    ahora = datetime.now()
+    if fecha_obj > hoy:
+        return 'activa'
+
+    # Si la reserva es de hoy, verificar hora_fin del turno
+    if fecha_obj == hoy:
+        hora_fin = None
+        # Intentar obtener hora_fin del turno
+        if 'hora_fin' in reserva and reserva['hora_fin']:
+            hora_fin = reserva['hora_fin']
+        elif 'turno' in reserva and reserva['turno'] and 'hora_fin' in reserva['turno']:
+            hora_fin = reserva['turno']['hora_fin']
+        if hora_fin:
+            # Normalizar formato HH:MM o HH:MM:SS
+            if isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+                hora_fin = hora_fin + ':00'
+            try:
+                hora_fin_dt = datetime.combine(hoy, datetime.strptime(hora_fin, '%H:%M:%S').time())
+                if ahora < hora_fin_dt:
+                    return 'activa'
+            except Exception as e:
+                pass  # Si falla el parseo, sigue con la lógica vieja
+
+    # Fecha pasada o (hoy y ya terminó el turno o no hay info de hora_fin)
+    resultado_true = execute_query(
+        "SELECT COUNT(*) as c FROM reserva_participante WHERE id_reserva=%s AND asistencia=1",
+        (reserva.get('id_reserva'),),
+        role='readonly'
+    )
+    cnt_true = resultado_true[0]['c'] if resultado_true else 0
+    if cnt_true and cnt_true > 0:
+        return 'asistida'
+
+    # Ninguno asistió/registrado
+    return 'sin asistencia'
+    # Si ya fue marcada cancelada, respetamos el valor almacenado
     estado_guardado = (reserva.get('estado') or '').strip().lower()
     if estado_guardado == 'cancelada':
         return 'cancelada'
@@ -72,7 +202,9 @@ def _compute_estado_actual(reserva):
 
     hoy = datetime.now().date()
     ahora = datetime.now()
+    print(f"[DEBUG] hoy: {hoy} ahora: {ahora}")
     if fecha_obj > hoy:
+        print("[DEBUG] Estado calculado: activa (fecha futura)")
         return 'activa'
 
     # Si la reserva es de hoy, verificar hora_fin del turno
@@ -83,15 +215,19 @@ def _compute_estado_actual(reserva):
             hora_fin = reserva['hora_fin']
         elif 'turno' in reserva and reserva['turno'] and 'hora_fin' in reserva['turno']:
             hora_fin = reserva['turno']['hora_fin']
+        print(f"[DEBUG] hora_fin usada para comparación: {hora_fin}")
         if hora_fin:
             # Normalizar formato HH:MM o HH:MM:SS
             if isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
                 hora_fin = hora_fin + ':00'
             try:
                 hora_fin_dt = datetime.combine(hoy, datetime.strptime(hora_fin, '%H:%M:%S').time())
+                print(f"[DEBUG] hora_fin_dt: {hora_fin_dt}")
                 if ahora < hora_fin_dt:
+                    print("[DEBUG] Estado calculado: activa (hoy, antes de hora_fin)")
                     return 'activa'
-            except Exception:
+            except Exception as e:
+                print(f"[DEBUG] Error parseando hora_fin: {e}")
                 pass  # Si falla el parseo, sigue con la lógica vieja
 
     # Fecha pasada o (hoy y ya terminó el turno o no hay info de hora_fin)
@@ -126,12 +262,8 @@ def crear_reserva_ruta():
         return jsonify({'error': 'Falta el identificador de turno: envía turnos (array), id_turno o hora_inicio'}), 400
 
     try:
-        print(f"[DEBUG] Fecha recibida: {datos.get('fecha')}")
-        print(f"[DEBUG] Fecha actual del servidor: {datetime.now().date()}")
         fecha_reserva = datetime.strptime(datos['fecha'], '%Y-%m-%d').date()
-        print(f"[DEBUG] Fecha parseada: {fecha_reserva}")
         if fecha_reserva < datetime.now().date():
-            print(f"[DEBUG] Fecha es pasada! {fecha_reserva} < {datetime.now().date()}")
             return jsonify({'error': 'No se puede reservar para una fecha pasada.'}), 400
 
         # Normalizar entrada: convertir a lista de id_turno
@@ -274,8 +406,21 @@ def listar_reservas_ruta():
             ci_participante = g.user_id  # Forzar filtro por CI del participante logueado
         
         reservas = listar_reservas(ci_participante=ci_participante, nombre_sala=nombre_sala)
-        # añadir un campo calculado 'estado_actual' para que el front lo muestre sin editar
+        # Asegurar que cada reserva tenga hora_fin (para el cálculo correcto del estado)
         for r in reservas:
+            # Asegurar que siempre haya id_turno y hora_fin
+            id_turno = r.get('id_turno')
+            if not id_turno and 'turno' in r and r['turno'] and 'id_turno' in r['turno']:
+                id_turno = r['turno']['id_turno']
+                r['id_turno'] = id_turno
+            if (not r.get('hora_fin')) and id_turno:
+                resultado_turno = execute_query(
+                    "SELECT TIME(hora_fin) as hora_fin FROM turno WHERE id_turno = %s",
+                    (id_turno,),
+                    role='readonly'
+                )
+                if resultado_turno and resultado_turno[0].get('hora_fin'):
+                    r['hora_fin'] = str(resultado_turno[0]['hora_fin'])
             try:
                 r['estado_actual'] = _compute_estado_actual(r)
             except Exception:
@@ -302,7 +447,19 @@ def obtener_reserva_ruta(id_reserva: int):
             if not resultado or resultado[0]['count'] == 0:
                 return jsonify({'error': 'No tienes permiso para ver esta reserva'}), 403
         
-        # Añadir estado calculado
+        # Asegurar que siempre haya id_turno y hora_fin
+        id_turno = reserva.get('id_turno')
+        if not id_turno and 'turno' in reserva and reserva['turno'] and 'id_turno' in reserva['turno']:
+            id_turno = reserva['turno']['id_turno']
+            reserva['id_turno'] = id_turno
+        if (not reserva.get('hora_fin')) and id_turno:
+            resultado_turno = execute_query(
+                "SELECT TIME(hora_fin) as hora_fin FROM turno WHERE id_turno = %s",
+                (id_turno,),
+                role='readonly'
+            )
+            if resultado_turno and resultado_turno[0].get('hora_fin'):
+                reserva['hora_fin'] = str(resultado_turno[0]['hora_fin'])
         try:
             reserva['estado_actual'] = _compute_estado_actual(reserva)
         except Exception:
