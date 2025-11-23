@@ -71,10 +71,30 @@ def _compute_estado_actual(reserva):
         return estado_guardado or 'activa'
 
     hoy = datetime.now().date()
+    ahora = datetime.now()
     if fecha_obj > hoy:
         return 'activa'
 
-    # Fecha pasada o igual a hoy -> revisar asistencia
+    # Si la reserva es de hoy, verificar hora_fin del turno
+    if fecha_obj == hoy:
+        hora_fin = None
+        # Intentar obtener hora_fin del turno
+        if 'hora_fin' in reserva and reserva['hora_fin']:
+            hora_fin = reserva['hora_fin']
+        elif 'turno' in reserva and reserva['turno'] and 'hora_fin' in reserva['turno']:
+            hora_fin = reserva['turno']['hora_fin']
+        if hora_fin:
+            # Normalizar formato HH:MM o HH:MM:SS
+            if isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+                hora_fin = hora_fin + ':00'
+            try:
+                hora_fin_dt = datetime.combine(hoy, datetime.strptime(hora_fin, '%H:%M:%S').time())
+                if ahora < hora_fin_dt:
+                    return 'activa'
+            except Exception:
+                pass  # Si falla el parseo, sigue con la lógica vieja
+
+    # Fecha pasada o (hoy y ya terminó el turno o no hay info de hora_fin)
     resultado_true = execute_query(
         "SELECT COUNT(*) as c FROM reserva_participante WHERE id_reserva=%s AND asistencia=1",
         (reserva.get('id_reserva'),),
@@ -318,6 +338,29 @@ def actualizar_reserva_ruta(id_reserva: int):
         estado_solicitado = (datos.get('estado') or '').strip().lower()
         if estado_solicitado == 'asistida':
             datos['estado'] = 'finalizada'
+
+        # Guard extra: evitar que participantes marquen 'sin asistencia' antes de que termine el turno
+        if estado_solicitado == 'sin asistencia' and g.user_type != 'admin':
+            reserva_info = obtener_reserva(id_reserva)
+            fecha_res = reserva_info.get('fecha')
+            hora_fin = None
+            if 'hora_fin' in reserva_info and reserva_info['hora_fin']:
+                hora_fin = reserva_info['hora_fin']
+            elif 'turno' in reserva_info and reserva_info['turno'] and 'hora_fin' in reserva_info['turno']:
+                hora_fin = reserva_info['turno']['hora_fin']
+            hoy = datetime.now().date()
+            ahora = datetime.now()
+            if fecha_res == hoy and hora_fin:
+                if isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+                    hora_fin = hora_fin + ':00'
+                try:
+                    hora_fin_dt = datetime.combine(hoy, datetime.strptime(hora_fin, '%H:%M:%S').time())
+                    if ahora < hora_fin_dt:
+                        return jsonify({'error': 'No se puede marcar sin asistencia antes de que finalice el turno', 'code': 'TURN_NOT_FINISHED'}), 403
+                except Exception:
+                    return jsonify({'error': 'No se puede marcar sin asistencia: información de turno incompleta', 'code': 'NO_TURNO_INFO'}), 403
+            elif fecha_res == hoy and not hora_fin:
+                return jsonify({'error': 'No se puede marcar sin asistencia: información de turno incompleta', 'code': 'NO_TURNO_INFO'}), 403
 
         # Actualizar la reserva en la BD
         filas_afectadas = actualizar_reserva(id_reserva, datos)
