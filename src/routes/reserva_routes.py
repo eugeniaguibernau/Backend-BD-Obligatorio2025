@@ -19,35 +19,33 @@ reserva_bp = Blueprint('reserva_bp', __name__)
 
 
 def _compute_estado_actual(reserva):
-    """Devuelve un estado calculado (lectura) para mostrar en el front.
+    """Devuelve el estado actual calculado para mostrar en el frontend.
 
-    Estados posibles devueltos:
-    - 'activa' (fecha futura)
-    - 'finalizada' (fecha pasada y hubo asistencia)  -- now we also support 'asistida' as an explicit attended state
-    - 'sin asistencia' (fecha pasada y nadie asistió)
-    - 'cancelada' (si ya está cancelada en la DB)
-    - cualquier estado distinto almacenado se devuelve tal cual
+    Estados posibles:
+    - 'activa' (fecha futura o turno de hoy sin finalizar)
+    - 'asistida' (hubo asistencia registrada)
+    - 'sin asistencia' (nadie asistió y ya terminó el turno)
+    - 'cancelada' (si está cancelada en la base de datos)
+    - cualquier otro estado almacenado se devuelve tal cual
     """
-    # Si ya fue marcada cancelada, respetamos el valor almacenado
 
     estado_guardado = (reserva.get('estado') or '').strip().lower()
     if estado_guardado == 'cancelada':
         return 'cancelada'
 
-    # Siempre intentar obtener hora_fin desde turno si falta
+    # Intentar obtener hora_fin desde turno si falta
     hora_fin = reserva.get('hora_fin')
     if not hora_fin and 'turno' in reserva and reserva['turno'] and 'hora_fin' in reserva['turno']:
         hora_fin = reserva['turno']['hora_fin']
         reserva['hora_fin'] = hora_fin
 
-    # Si el estado guardado es distinto de 'activa' tenemos que tratar
-    # algunos casos especiales:
-    # - si está 'finalizada' y hay al menos 1 asistencia registrada, devolver 'asistida'
-    # - si está 'finalizada' y NO hubo asistencia, devolver 'sin asistencia' (para indicar sanción)
-    # - para otros estados no-activa, devolver tal cual
+    # Si el estado guardado es distinto de 'activa', tratar casos especiales:
+    # - 'finalizada' y hay asistencia: devolver 'asistida'
+    # - 'finalizada' y NO hubo asistencia: devolver 'sin asistencia'
+    # - otros estados no-activa: devolver tal cual
     if estado_guardado and estado_guardado != 'activa':
         if estado_guardado == 'finalizada':
-            # revisar asistencia para distinguir entre 'asistida' y 'sin asistencia'
+            # Revisar asistencia para distinguir entre 'asistida' y 'sin asistencia'
             try:
                 resultado_true = execute_query(
                     "SELECT COUNT(*) as c FROM reserva_participante WHERE id_reserva=%s AND asistencia=1",
@@ -108,7 +106,7 @@ def _compute_estado_actual(reserva):
                 pass
         return estado_guardado
 
-    # Solo calculamos para reservas que en DB están como 'activa' (o sin estado)
+    # Solo calcular para reservas que en la base están como 'activa' (o sin estado)
     fecha_res = reserva.get('fecha')
     try:
         if isinstance(fecha_res, str):
@@ -116,10 +114,10 @@ def _compute_estado_actual(reserva):
         elif isinstance(fecha_res, date):
             fecha_obj = fecha_res
         else:
-            # si es otro tipo, intentar convertir directamente
+            # Si es otro tipo, intentar convertir directamente
             fecha_obj = date.fromisoformat(str(fecha_res))
     except Exception:
-        # En caso de error, retornamos el estado guardado
+        # En caso de error, retornar el estado guardado
         return estado_guardado or 'activa'
 
     hoy = datetime.now().date()
@@ -163,11 +161,10 @@ def _compute_estado_actual(reserva):
     if estado_guardado == 'cancelada':
         return 'cancelada'
 
-    # Si el estado guardado es distinto de 'activa' tenemos que tratar
-    # algunos casos especiales:
-    # - si está 'finalizada' y hay al menos 1 asistencia registrada, devolver 'asistida'
-    # - si está 'finalizada' y NO hubo asistencia, devolver 'sin asistencia' (para indicar sanción)
-    # - para otros estados no-activa, devolver tal cual
+    # Si el estado guardado es distinto de 'activa', tratar casos especiales:
+    # - 'finalizada' y hay asistencia: devolver 'asistida'
+    # - 'finalizada' y NO hubo asistencia: devolver 'sin asistencia'
+    # - otros estados no-activa: devolver tal cual
     if estado_guardado and estado_guardado != 'activa':
         if estado_guardado == 'finalizada':
             # revisar asistencia para distinguir entre 'asistida' y 'sin asistencia'
@@ -519,6 +516,35 @@ def actualizar_reserva_ruta(id_reserva: int):
             elif fecha_res == hoy and not hora_fin:
                 return jsonify({'error': 'No se puede marcar sin asistencia: información de turno incompleta', 'code': 'NO_TURNO_INFO'}), 403
 
+        # Si se intenta marcar como 'sin asistencia' o 'finalizada' antes de hora_fin, forzar estado 'activa'
+        estado_solicitado = (datos.get('estado') or '').strip().lower()
+        if estado_solicitado in ('sin asistencia', 'finalizada'):
+            reserva_info = obtener_reserva(id_reserva)
+            fecha_res = reserva_info.get('fecha')
+            # Ensure fecha_res is a datetime.date
+            if isinstance(fecha_res, str):
+                try:
+                    fecha_res = datetime.strptime(fecha_res, '%Y-%m-%d').date()
+                except Exception:
+                    fecha_res = None
+            hora_fin = None
+            if 'hora_fin' in reserva_info and reserva_info['hora_fin']:
+                hora_fin = reserva_info['hora_fin']
+            elif 'turno' in reserva_info and reserva_info['turno'] and 'hora_fin' in reserva_info['turno']:
+                hora_fin = reserva_info['turno']['hora_fin']
+            hoy = datetime.now().date()
+            ahora = datetime.now()
+            if fecha_res == hoy and hora_fin:
+                if isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+                    hora_fin = hora_fin + ':00'
+                try:
+                    hora_fin_dt = datetime.combine(hoy, datetime.strptime(hora_fin, '%H:%M:%S').time())
+                    if ahora < hora_fin_dt:
+                        return jsonify({'error': 'No se puede marcar sin asistencia ni finalizar antes de que termine el turno', 'code': 'TURN_NOT_FINISHED'}), 403
+                except Exception:
+                    return jsonify({'error': 'No se puede marcar sin asistencia: información de turno incompleta', 'code': 'NO_TURNO_INFO'}), 403
+            elif fecha_res and fecha_res > hoy:
+                return jsonify({'error': 'No se puede marcar sin asistencia ni finalizar una reserva a futuro', 'code': 'FUTURE_RESERVA'}), 403
         # Actualizar la reserva en la BD
         filas_afectadas = actualizar_reserva(id_reserva, datos)
 
@@ -581,7 +607,44 @@ def actualizar_reserva_ruta(id_reserva: int):
         estado_nuevo = (datos.get('estado') or '').strip().lower()
         debe_aplicar_sancion = estado_nuevo in ('sin asistencia', 'cerrada')
 
+        # Solo aplicar sanción si el turno ya terminó (hora_fin < ahora)
+        aplicar_sancion = False
         if debe_aplicar_sancion:
+            reserva_info = obtener_reserva(id_reserva)
+            fecha_res = reserva_info.get('fecha')
+            # Ensure fecha_res is a datetime.date
+            if isinstance(fecha_res, str):
+                try:
+                    fecha_res = datetime.strptime(fecha_res, '%Y-%m-%d').date()
+                except Exception:
+                    fecha_res = None
+            hora_fin = None
+            if 'hora_fin' in reserva_info and reserva_info['hora_fin']:
+                hora_fin = reserva_info['hora_fin']
+            elif 'turno' in reserva_info and reserva_info['turno'] and 'hora_fin' in reserva_info['turno']:
+                hora_fin = reserva_info['turno']['hora_fin']
+            hoy = datetime.now().date()
+            ahora = datetime.now()
+            turno_ya_termino = True
+            if fecha_res == hoy and hora_fin:
+                if isinstance(hora_fin, str) and len(hora_fin.split(':')) == 2:
+                    hora_fin = hora_fin + ':00'
+                try:
+                    hora_fin_dt = datetime.combine(hoy, datetime.strptime(hora_fin, '%H:%M:%S').time())
+                    if ahora >= hora_fin_dt:
+                        turno_ya_termino = True
+                    else:
+                        turno_ya_termino = False
+                except Exception:
+                    turno_ya_termino = True  # Si no se puede parsear, por seguridad aplicar sanción
+            elif fecha_res == hoy and not hora_fin:
+                turno_ya_termino = False  # No hay info de hora_fin, no aplicar sanción aún
+            if fecha_res and fecha_res > hoy:
+                turno_ya_termino = False  # Es una reserva a futuro
+            if turno_ya_termino:
+                aplicar_sancion = True
+
+        if aplicar_sancion:
             try:
                 resultado = aplicar_sanciones_por_reserva(id_reserva, sancion_dias=60)
                 respuesta['sanciones'] = {
@@ -601,7 +664,10 @@ def actualizar_reserva_ruta(id_reserva: int):
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'error': 'Error interno', 'detalle': str(e)}), 500
+        import traceback
+        print('--- Exception in actualizar_reserva_ruta ---')
+        print(traceback.format_exc())
+        return jsonify({'error': 'Error interno', 'detalle': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @reserva_bp.route('/<int:id_reserva>', methods=['DELETE'])

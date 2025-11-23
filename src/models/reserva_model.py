@@ -515,6 +515,7 @@ def obtener_reserva(id_reserva):
     return reserva
 
 
+
 def actualizar_reserva(id_reserva, datos):
     CANCEL_DIAS = 2
     SANCION_DIAS = 60
