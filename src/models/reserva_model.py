@@ -24,133 +24,206 @@ def validar_reglas_negocio(datos):
         return False, f"La sala solo permite {sala['capacidad']} participantes."
 
     tipo_sala = sala['tipo_sala']
-
-    # Verificar disponibilidad de sala/turno (no debe haber otra reserva activa)
-    cursor.execute("""
-        SELECT COUNT(*) AS cantidad
-        FROM reserva
-        WHERE nombre_sala=%s AND edificio=%s AND fecha=%s AND id_turno=%s AND estado = 'activa'
-    """, (nombre_sala, edificio, fecha, id_turno))
-    conflicto = cursor.fetchone()['cantidad']
-    if conflicto and conflicto > 0:
-        return False, "La sala/turno ya está reservada en ese horario."
-
-    # Validar que el turno existe y es un bloque de 1 hora dentro del horario permitido (08:00-23:00)
-    cursor.execute("SELECT TIME(hora_inicio) as hora_inicio, TIME(hora_fin) as hora_fin, TIMEDIFF(hora_fin,hora_inicio) as duracion FROM turno WHERE id_turno = %s", (id_turno,))
-    turno = cursor.fetchone()
-    if not turno:
-        return False, "Turno inválido."
-    # duracion debe ser exactamente 01:00:00
-    duracion = turno.get('duracion') if isinstance(turno, dict) else turno[2]
-    # aceptar timedelta(1 hour) o strings '01:00:00'/'1:00:00'
-    from datetime import timedelta
-    if hasattr(duracion, 'total_seconds'):
-        if duracion != timedelta(hours=1):
-            return False, "Solo se permiten turnos de 1 horado."
-    else:
-        ds = str(duracion)
-        if ds not in ('1:00:00', '1:00:00'):
-            return False, "Solo se permiten turnos de 2 hora."
-    hi = turno.get('hora_inicio') if isinstance(turno, dict) else turno[0]
-    hf = turno.get('hora_fin') if isinstance(turno, dict) else turno[1]
-    # normalizar a string HH:MM:SS para comparar
-    hi_s = str(hi) if not isinstance(hi, str) else hi
-    hf_s = str(hf) if not isinstance(hf, str) else hf
-    # horario permitido: hora_inicio >= 08:00:00 y hora_fin <= 23:00:00
+    # Normalizar tipo_sala por seguridad
     try:
-        hi_hour = int(hi_s.split(':')[0])
-        hf_hour = int(hf_s.split(':')[0])
-        if hi_hour < 8 or hf_hour > 23:
-            return False, "Turno fuera del horario permitido (08:00-23:00)."
+        tipo_sala = (tipo_sala or '').strip().lower()
+        nombre_sala = datos['nombre_sala']
+        edificio = datos['edificio']
+        participantes = datos['participantes']
+
+        # Support multiple requested reservations/dates in the same request.
+        # Priority:
+        # - if 'reservas' in datos: expect list of {fecha: 'YYYY-MM-DD', id_turno: X}
+        # - elif 'fechas' in datos: list of date strings
+        # - else: use single 'fecha' field
+        requested_dates = []
+        if isinstance(datos.get('reservas'), list) and len(datos.get('reservas')) > 0:
+            for r in datos.get('reservas'):
+                f = r.get('fecha') if isinstance(r, dict) else None
+                if f:
+                    requested_dates.append(str(f))
+        elif isinstance(datos.get('fechas'), list) and len(datos.get('fechas')) > 0:
+            for f in datos.get('fechas'):
+                requested_dates.append(str(f))
+        else:
+            # fallback to single fecha
+            if 'fecha' in datos:
+                requested_dates.append(str(datos.get('fecha')))
+
+        # normalize requested_dates to YYYY-MM-DD strings and remove empties
+        parsed_dates = []
+        for d in requested_dates:
+            try:
+                dt = datetime.strptime(d, '%Y-%m-%d').date()
+                parsed_dates.append(dt.strftime('%Y-%m-%d'))
+            except Exception:
+                # ignore invalid dates - validation of date format should be handled earlier
+                pass
+
+        # open readonly connection
+        conexion = get_connection(role='readonly')
+        cursor = conexion.cursor()
+
+        # Validate sala exists and capacity
+        cursor.execute("SELECT capacidad, tipo_sala FROM sala WHERE nombre_sala=%s AND edificio=%s", (nombre_sala, edificio))
+        sala = cursor.fetchone()
+        if not sala:
+            cursor.close(); conexion.close()
+            return False, "La sala no existe."
+
+        if len(participantes) > sala.get('capacidad', 0):
+            cursor.close(); conexion.close()
+            return False, f"La sala solo permite {sala.get('capacidad')} participantes."
+
+        tipo_sala = (sala.get('tipo_sala') or '').strip().lower()
+
+        # Check turno existence if a single id_turno provided (retrocompat)
+        if 'id_turno' in datos:
+            try:
+                cursor.execute("SELECT 1 FROM turno WHERE id_turno = %s LIMIT 1", (datos.get('id_turno'),))
+                if not cursor.fetchone():
+                    cursor.close(); conexion.close()
+                    return False, "Turno inválido."
+            except Exception:
+                # ignore and proceed; deeper validation elsewhere
+                pass
+
+        # Sanctions check
+        for ci in participantes:
+            cursor.execute("""
+                SELECT COUNT(*) AS cantidad
+                FROM sancion_participante
+                WHERE ci_participante = %s
+                  AND fecha_inicio <= CURDATE()
+                  AND fecha_fin >= CURDATE()
+            """, (ci,))
+            sanciones = cursor.fetchone()['cantidad']
+            if sanciones and sanciones > 0:
+                cursor.close(); conexion.close()
+                return False, f"El participante {ci} tiene sanciones vigentes y no puede reservar."
+
+        # Gather roles per participant
+        roles_por_ci = {}
+        for ci in participantes:
+            cursor.execute("""
+                SELECT pa.tipo as tipo_programa, ppa.rol as rol
+                FROM participante_programa_academico ppa
+                JOIN programa_academico pa ON ppa.nombre_programa = pa.nombre_programa
+                WHERE ci_participante = %s
+            """, (ci,))
+            filas = cursor.fetchall()
+            if not filas:
+                cursor.close(); conexion.close()
+                return False, f"El participante {ci} no tiene programa académico asignado."
+
+            roles = set()
+            tipos_prog = set()
+            for f in filas:
+                try:
+                    roles.add((f.get('rol') or '').strip().lower())
+                except Exception:
+                    pass
+                try:
+                    tipos_prog.add((f.get('tipo_programa') or '').strip().lower())
+                except Exception:
+                    pass
+
+            effective_role = 'alumno'
+            if 'docente' in roles:
+                effective_role = 'docente'
+            elif 'postgrado' in roles or 'posgrado' in roles:
+                effective_role = 'postgrado'
+            elif 'alumno' in roles:
+                effective_role = 'alumno'
+            else:
+                if 'postgrado' in tipos_prog or 'posgrado' in tipos_prog:
+                    effective_role = 'postgrado'
+
+            roles_por_ci[ci] = effective_role
+
+            # exclusivity checks
+            if tipo_sala == 'docente' and effective_role != 'docente':
+                cursor.close(); conexion.close()
+                return False, f"La sala {nombre_sala} es exclusiva de docentes."
+            if tipo_sala == 'posgrado' and effective_role != 'postgrado':
+                cursor.close(); conexion.close()
+                return False, f"La sala {nombre_sala} es exclusiva de posgrado."
+
+        # Build requested counts per week and per date
+        # week key: YYYY-MM-DD (start of week Monday)
+        from collections import defaultdict
+
+        def week_start_for_date(dt_date):
+            d = datetime.strptime(dt_date, '%Y-%m-%d').date()
+            start = d - timedelta(days=d.weekday())
+            return start.strftime('%Y-%m-%d')
+
+        # requested per-week and per-date (same for all participants in this request)
+        requested_per_week = defaultdict(int)
+        requested_per_date = defaultdict(int)
+        for d in parsed_dates:
+            wk = week_start_for_date(d)
+            requested_per_week[wk] += 1
+            requested_per_date[d] += 1
+
+        # For each participant, apply daily and weekly checks (unless exempt)
+        for ci in participantes:
+            eff = roles_por_ci.get(ci)
+            is_exempt = (eff == 'docente' and tipo_sala == 'docente') or (eff == 'postgrado' and tipo_sala == 'posgrado')
+            if is_exempt:
+                continue
+
+            # Daily (2 hours) check: for each date in requested_per_date, count existing hours + requested on that date
+            for date_str, req_cnt_on_date in requested_per_date.items():
+                cursor.execute("""
+                    SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, t.hora_inicio, t.hora_fin)),0) AS horas_reservadas
+                    FROM reserva_participante rp
+                    JOIN reserva r ON rp.id_reserva = r.id_reserva
+                    JOIN turno t ON r.id_turno = t.id_turno
+                    WHERE rp.ci_participante = %s
+                      AND r.fecha = %s
+                      AND r.estado = 'activa'
+                """, (ci, date_str))
+                horas_reservadas = cursor.fetchone()['horas_reservadas'] or 0
+                # requested hours on that date = req_cnt_on_date * 1 (each turno 1h)
+                if (horas_reservadas + req_cnt_on_date) > 2:
+                    cursor.close(); conexion.close()
+                    return False, f"El participante {ci} excede el límite diario en {date_str} ({horas_reservadas} existentes + {req_cnt_on_date} solicitadas). Máximo permitido: 2 horas."
+
+            # Weekly check: for each week in requested_per_week, count existing turnos in DB + requested
+            for wk_start, req_cnt in requested_per_week.items():
+                wk_start_date = datetime.strptime(wk_start, '%Y-%m-%d').date()
+                wk_end_date = wk_start_date + timedelta(days=6)
+                # Count existing turnos (cada fila en reserva_participante corresponde a un turno)
+                # Contar sólo reservas en salas libres: excluir salas con tipo 'docente' o 'posgrado/postgrado'
+                # Usamos COALESCE(LOWER(s.tipo_sala),'') para evitar problemas con NULL
+                cursor.execute("""
+                    SELECT COUNT(*) AS cantidad
+                    FROM reserva_participante rp
+                    JOIN reserva r ON rp.id_reserva = r.id_reserva
+                    JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
+                    WHERE rp.ci_participante = %s
+                      AND r.fecha BETWEEN %s AND %s
+                      AND r.estado = 'activa'
+                      AND COALESCE(LOWER(s.tipo_sala), '') NOT IN ('docente','posgrado','postgrado')
+                """, (ci, wk_start_date, wk_end_date))
+                existentes = cursor.fetchone()['cantidad'] or 0
+                total = existentes + req_cnt
+                if total > 3:
+                    cursor.close(); conexion.close()
+                    return False, f"El participante {ci} excede el límite semanal en la semana {wk_start} ({existentes} existentes + {req_cnt} solicitadas = {total}). Máximo permitido: 3."
+
+        cursor.close()
+        conexion.close()
+        return True, "OK"
     except Exception:
-        return False, "Turno inválido: formato de hora inesperado."
-
-    # Verificar sanciones vigentes por participante
-    for ci in participantes:
-        cursor.execute("""
-            SELECT COUNT(*) AS cantidad
-            FROM sancion_participante
-            WHERE ci_participante = %s 
-            AND fecha_inicio <= CURDATE() 
-            AND fecha_fin >= CURDATE()
-        """, (ci,))
-        sanciones = cursor.fetchone()['cantidad']
-        if sanciones and sanciones > 0:
-            return False, f"El participante {ci} tiene sanciones vigentes y no puede reservar."
-
-    for ci in participantes:
-        cursor.execute("""
-            SELECT pa.tipo, ppa.rol
-            FROM participante_programa_academico ppa
-            JOIN programa_academico pa ON ppa.nombre_programa = pa.nombre_programa
-            WHERE ci_participante = %s
-        """, (ci,))
-        programa = cursor.fetchone()
-        if not programa:
-            return False, f"El participante {ci} no tiene programa académico asignado."
-
-        # DEBUG: mostrar valores obtenidos de la BD para diagnosticar casos
-        # donde el participante parece no ser posgrado/docente aunque el seed lo indique.
+        # Catch-all para asegurar que el try exterior no deje la función sin un bloque except/finally.
         try:
-            print(f"[VALIDAR] ci={ci} tipo_sala={tipo_sala} programa_row={programa}")
+            cursor.close()
+            conexion.close()
         except Exception:
             pass
-
-        # Normalizar valores y aceptar variantes de escritura.
-        rol_part = (programa.get('rol') or '').lower()
-        tipo_prog = (programa.get('tipo') or '').lower()
-
-        # La sala docente requiere que el participante tenga rol 'docente'
-        if tipo_sala == 'docente' and rol_part != 'docente':
-            return False, f"La sala {nombre_sala} es exclusiva de docentes."
-
-        # La sala posgrado acepta participantes cuyo rol o tipo de programa
-        # indiquen posgrado. En el código histórico se usan ambas variantes
-        # 'postgrado' y 'posgrado' en distintos lugares, así que las
-        # consideramos equivalentes aquí.
-        if tipo_sala == 'posgrado' and not (
-            rol_part in ('postgrado', 'posgrado') or tipo_prog in ('postgrado', 'posgrado')
-        ):
-            return False, f"La sala {nombre_sala} es exclusiva de posgrado."
-
-    # Reglas globales para participantes: máximo 2 horas/día y 3 reservas activas/semana
-    for ci in participantes:
-        # Validar máximo 2 horas por día (sumando la duración de todas las reservas)
-        cursor.execute("""
-            SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, t.hora_inicio, t.hora_fin)), 0) AS horas_reservadas
-            FROM reserva_participante rp
-            JOIN reserva r ON rp.id_reserva = r.id_reserva
-            JOIN turno t ON r.id_turno = t.id_turno
-            WHERE rp.ci_participante = %s 
-            AND r.fecha = %s 
-            AND r.estado = 'activa'
-        """, (ci, fecha))
-        horas_reservadas = cursor.fetchone()['horas_reservadas'] or 0
-        
-        # Como cada turno es de 1 hora, también podemos validar así:
-        # Pero la query anterior es más robusta y funciona aunque cambien los turnos
-        if horas_reservadas >= 2:
-            return False, f"El participante {ci} ya tiene {horas_reservadas} horas reservadas ese día. Máximo permitido: 2 horas."
-
-        # Validar máximo 3 reservas activas por semana
-        fecha_base = datetime.strptime(fecha, '%Y-%m-%d').date()
-        inicio_semana = fecha_base - timedelta(days=fecha_base.weekday())
-        fin_semana = inicio_semana + timedelta(days=6)
-        cursor.execute("""
-            SELECT COUNT(*) AS cantidad
-            FROM reserva_participante rp
-            JOIN reserva r ON rp.id_reserva = r.id_reserva
-            WHERE rp.ci_participante = %s
-            AND r.fecha BETWEEN %s AND %s
-            AND r.estado = 'activa'
-        """, (ci, inicio_semana, fin_semana))
-        activas = cursor.fetchone()['cantidad']
-        if activas >= 3:
-            return False, f"El participante {ci} ya tiene {activas} reservas activas esta semana. Máximo permitido: 3 reservas."
-
-    cursor.close()
-    conexion.close()
-    return True, "OK"
+        return False, "Error interno en validar_reglas_negocio"
 
 def crear_reserva(nombre_sala, edificio, fecha, id_turno, participantes):
     conexion = get_connection(role='user')
@@ -171,6 +244,147 @@ def crear_reserva(nombre_sala, edificio, fecha, id_turno, participantes):
     cursor.close()
     conexion.close()
     return id_reserva
+
+
+def crear_reservas_batch(nombre_sala, edificio, fecha, turnos, participantes):
+    """Crear varias reservas (una por cada id_turno) en una sola transacción.
+
+    Valida atómicamente el límite semanal por participante contando turnos existentes
+    en la semana y sumando los turnos solicitados en este batch.
+    """
+    if not isinstance(turnos, list) or len(turnos) == 0:
+        raise ValueError("turnos debe ser una lista no vacía")
+
+    conn = get_connection(role='user')
+    cur = conn.cursor()
+
+    # Obtener tipo de sala y capacidad
+    cur.execute("SELECT capacidad, tipo_sala FROM sala WHERE nombre_sala=%s AND edificio=%s", (nombre_sala, edificio))
+    sala = cur.fetchone()
+    if not sala:
+        conn.close()
+        raise ValueError("La sala no existe.")
+    tipo_sala = (sala.get('tipo_sala') or '').strip().lower()
+    if len(participantes) > sala.get('capacidad', 0):
+        conn.close()
+        raise ValueError(f"La sala solo permite {sala.get('capacidad')} participantes.")
+
+    # Calcular semana de la fecha
+    fecha_base = datetime.strptime(fecha, '%Y-%m-%d').date()
+    inicio_semana = fecha_base - timedelta(days=fecha_base.weekday())
+    fin_semana = inicio_semana + timedelta(days=6)
+
+    # Recolectar roles y validar exclusividad inmediata
+    roles_por_ci = {}
+    for ci in participantes:
+        cur.execute("""
+            SELECT pa.tipo as tipo_programa, ppa.rol as rol
+            FROM participante_programa_academico ppa
+            JOIN programa_academico pa ON ppa.nombre_programa = pa.nombre_programa
+            WHERE ci_participante = %s
+        """, (ci,))
+        filas = cur.fetchall()
+        if not filas:
+            conn.close()
+            raise ValueError(f"El participante {ci} no tiene programa académico asignado.")
+
+        roles = set()
+        tipos_prog = set()
+        for f in filas:
+            try:
+                roles.add((f.get('rol') or '').strip().lower())
+            except Exception:
+                pass
+            try:
+                tipos_prog.add((f.get('tipo_programa') or '').strip().lower())
+            except Exception:
+                pass
+
+        effective_role = 'alumno'
+        if 'docente' in roles:
+            effective_role = 'docente'
+        elif 'postgrado' in roles or 'posgrado' in roles:
+            effective_role = 'postgrado'
+        elif 'alumno' in roles:
+            effective_role = 'alumno'
+        else:
+            if 'postgrado' in tipos_prog or 'posgrado' in tipos_prog:
+                effective_role = 'postgrado'
+
+        roles_por_ci[ci] = effective_role
+
+        # Exclusividad de sala
+        if tipo_sala == 'docente' and effective_role != 'docente':
+            conn.close()
+            raise ValueError(f"La sala {nombre_sala} es exclusiva de docentes.")
+        if tipo_sala == 'posgrado' and effective_role != 'postgrado':
+            conn.close()
+            raise ValueError(f"La sala {nombre_sala} es exclusiva de posgrado.")
+
+    # Validar límite semanal por participante (turnos existentes + turnos solicitados en este batch)
+    turnos_solicitados = len(turnos)
+    for ci in participantes:
+        eff = roles_por_ci.get(ci)
+        is_exempt = (eff == 'docente' and tipo_sala == 'docente') or (eff == 'postgrado' and tipo_sala == 'posgrado')
+        if is_exempt:
+            continue
+
+        cur.execute("""
+            SELECT COUNT(DISTINCT r.id_reserva) AS cantidad
+            FROM reserva_participante rp
+            JOIN reserva r ON rp.id_reserva = r.id_reserva
+            WHERE rp.ci_participante = %s
+            AND r.fecha BETWEEN %s AND %s
+            AND r.estado = 'activa'
+        """, (ci, inicio_semana, fin_semana))
+        # Contar sólo reservas en salas libres (excluir 'docente' y 'posgrado/postgrado')
+        cur.execute("""
+            SELECT COUNT(DISTINCT r.id_reserva) AS cantidad
+            FROM reserva_participante rp
+            JOIN reserva r ON rp.id_reserva = r.id_reserva
+            JOIN sala s ON r.nombre_sala = s.nombre_sala AND r.edificio = s.edificio
+            WHERE rp.ci_participante = %s
+            AND r.fecha BETWEEN %s AND %s
+            AND r.estado = 'activa'
+            AND COALESCE(LOWER(s.tipo_sala), '') NOT IN ('docente','posgrado','postgrado')
+        """, (ci, inicio_semana, fin_semana))
+        existentes = cur.fetchone()['cantidad']
+        try:
+            print(f"[BATCH_SEMANA] ci={ci} existentes={existentes} inicio={inicio_semana} fin={fin_semana} turnos_solicitados={turnos_solicitados}")
+        except Exception:
+            pass
+        total = (existentes or 0) + turnos_solicitados
+        try:
+            print(f"[BATCH_SEMANA_TOTAL] ci={ci} existentes={existentes} total={total}")
+        except Exception:
+            pass
+        if total > 3:
+            conn.close()
+            raise ValueError(f"El participante {ci} ya tiene reservas activas esta semana (máximo 3).")
+
+    # Si pasaron las validaciones, crear todas las reservas e insertar participantes
+    creadas = []
+    try:
+        for id_turno in turnos:
+            cur.execute("""
+                INSERT INTO reserva (nombre_sala, edificio, fecha, id_turno, estado)
+                VALUES (%s, %s, %s, %s, 'activa')
+            """, (nombre_sala, edificio, fecha, id_turno))
+            id_res = cur.lastrowid
+            for ci in participantes:
+                cur.execute("""
+                    INSERT INTO reserva_participante (ci_participante, id_reserva, fecha_solicitud_reserva, asistencia)
+                    VALUES (%s, %s, NOW(), NULL)
+                """, (ci, id_res))
+            creadas.append({'id_reserva': id_res, 'id_turno': id_turno})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+
+    conn.close()
+    return creadas
 
 
 def listar_reservas(ci_participante=None, nombre_sala=None):

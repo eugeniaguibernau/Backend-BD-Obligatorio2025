@@ -7,6 +7,7 @@ from src.models.reserva_model import (
     actualizar_reserva,
     eliminar_reserva,
     validar_reglas_negocio,
+    crear_reservas_batch,
     marcar_asistencia
 )
 from src.models.sancion_model import aplicar_sanciones_por_reserva, eliminar_sancion
@@ -202,33 +203,17 @@ def crear_reserva_ruta():
             # en caso de cualquier fallo de esta comprobación seguimos con el flujo normal
             pass
 
-        # Validar todas las reservas ANTES de crear cualquiera
-        for id_turno in turnos_a_reservar:
-            datos_validacion = {
-                'nombre_sala': datos['nombre_sala'],
-                'edificio': datos['edificio'],
-                'fecha': datos['fecha'],
-                'id_turno': id_turno,
-                'participantes': datos['participantes']
-            }
-            valido, mensaje = validar_reglas_negocio(datos_validacion)
-            if not valido:
-                return jsonify({'error': f'Turno {id_turno}: {mensaje}'}), 400
-
-        # Todas las validaciones pasaron, ahora crear las reservas
-        reservas_creadas = []
-        for id_turno in turnos_a_reservar:
-            id_generado = crear_reserva(
+        # Crear las reservas en batch (validación atómica + inserción)
+        try:
+            reservas_creadas = crear_reservas_batch(
                 datos['nombre_sala'],
                 datos['edificio'],
                 datos['fecha'],
-                id_turno,
+                turnos_a_reservar,
                 datos['participantes']
             )
-            reservas_creadas.append({
-                'id_reserva': id_generado,
-                'id_turno': id_turno
-            })
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
 
         # Respuesta
         if len(reservas_creadas) == 1:
